@@ -1,0 +1,78 @@
+setup_repo.py
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.venv/
+venv/
+ENV/
+env/
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Bash
+*.log
+*.tmp
+*.temp
+*.swp
+*~
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# FreeSurfer specific
+freesurfer_license.txt
+*.mgz
+*.mgh
+*.nii.gz
+*.nii
+*.gii
+*.fif
+
+# BIDS datasets
+/bids_dataset/
+/output/
+/derivatives/
+/scratch/
+/work/
+
+# Large files
+*.tar.gz
+*.zip
+*.7z
+
