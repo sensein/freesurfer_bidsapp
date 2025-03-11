@@ -15,9 +15,10 @@ setup(
         "Intended Audience :: Science/Research",
         "Topic :: Scientific/Engineering :: Medical Science Apps.",
         "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
     entry_points={
         "console_scripts": [
@@ -25,16 +26,15 @@ setup(
         ],
     },
     install_requires=[
-        "click>=8.0.0",  # Using standard Click instead of ClickBit
-        "pybids>=0.15.1",
-        "nipype>=1.8.5",
-        "nibabel>=5.0.0",
-        "numpy>=1.20.0",
-        "pandas>=1.3.0",
-        "prov>=2.0.0",
-        "rdflib>=6.0.0",
-        "PyLD>=2.0.0",  # For better JSON-LD support
-        "jsonld>=1.0.0",
+    "click>=8.0.0",
+    "pybids>=0.15.1",
+    "nipype>=1.8.5",
+    "nibabel>=5.0.0",
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "prov>=2.0.0",
+    "rdflib>=6.0.0",
+    "PyLD>=2.0.0",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.9",
 )
