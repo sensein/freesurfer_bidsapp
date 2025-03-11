@@ -114,16 +114,52 @@ def create_dataset_description(output_dir, version):
 
 
 def get_freesurfer_version():
-    """Get FreeSurfer version."""
+    """Get FreeSurfer version.
+    
+    Returns the version of FreeSurfer from the installed environment, handling
+    different output formats across versions.
+    
+    Returns:
+        str: Version number (e.g., "7.3.2" or "8.0.0")
+    """
     try:
         output = subprocess.check_output(['recon-all', '--version'], 
                                         stderr=subprocess.STDOUT).decode().strip()
-        # Handle FreeSurfer 8.0.0 version format which might be different
-        if '8.0.0' in output:
-            return '8.0.0'
-        return output.split('\n')[0].split(' ')[-1]
-    except:
-        return "8.0.0"  # Default if detection fails
+        
+        # Pattern 1: "FreeSurfer X.Y.Z" format
+        if output.startswith('FreeSurfer '):
+            version_parts = output.split('FreeSurfer ')[1].split('\n')[0].strip()
+            return version_parts
+        
+        # Pattern 2: "recon-all vX.Y.Z (additional info)" format
+        if 'recon-all v' in output:
+            return output.split('v')[1].split(' ')[0].strip()
+        
+        # Pattern 3: Just extract the last part of the first line as a fallback
+        return output.split('\n')[0].split(' ')[-1].strip()
+        
+    except Exception as e:
+        # Log the error
+        logger.warning(f"Could not determine FreeSurfer version: {str(e)}")
+        
+        # Try to extract version from FREESURFER_HOME
+        try:
+            fs_home = os.environ.get('FREESURFER_HOME', '')
+            version_file = os.path.join(fs_home, 'build-stamp.txt')
+            
+            if os.path.exists(version_file):
+                with open(version_file, 'r') as f:
+                    version_content = f.read().strip()
+                    # Extract version number using regex
+                    import re
+                    version_match = re.search(r'v?(\d+\.\d+\.\d+)', version_content)
+                    if version_match:
+                        return version_match.group(1)
+        except:
+            pass
+            
+        # Default to Unknown if all else fails
+        return "unknown"
 
 
 def get_subjects_to_analyze(layout, participant_label):
