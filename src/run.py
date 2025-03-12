@@ -85,6 +85,12 @@ def check_freesurfer_env(freesurfer_license):
     if not license_file or not os.path.exists(license_file):
         logger.error("FreeSurfer license file not found.")
         sys.exit(1)
+    
+    try:
+        subprocess.check_output(['which', 'recon-all'], stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError:
+        logger.error("FreeSurfer binaries not found in PATH. Check Docker image configuration.")
+        sys.exit(1)
 
 
 def create_dataset_description(output_dir, version):
@@ -104,7 +110,11 @@ def create_dataset_description(output_dir, version):
             {
                 "Name": "FreeSurfer",
                 "Version": freesurfer_version,
-                "CodeURL": "https://surfer.nmr.mgh.harvard.edu/"
+                "CodeURL": "https://surfer.nmr.mgh.harvard.edu/",
+                "Container": {
+                    "Type": "docker",
+                    "Tag": "vnmd/freesurfer_8.0.0"
+                }
             }
         ]
     }
@@ -123,6 +133,7 @@ def get_freesurfer_version():
         str: Version number (e.g., "7.3.2" or "8.0.0")
     """
     try:
+        # For Docker image, try to get version directly
         output = subprocess.check_output(['recon-all', '--version'], 
                                         stderr=subprocess.STDOUT).decode().strip()
         
@@ -142,24 +153,10 @@ def get_freesurfer_version():
         # Log the error
         logger.warning(f"Could not determine FreeSurfer version: {str(e)}")
         
-        # Try to extract version from FREESURFER_HOME
-        try:
-            fs_home = os.environ.get('FREESURFER_HOME', '')
-            version_file = os.path.join(fs_home, 'build-stamp.txt')
-            
-            if os.path.exists(version_file):
-                with open(version_file, 'r') as f:
-                    version_content = f.read().strip()
-                    # Extract version number using regex
-                    import re
-                    version_match = re.search(r'v?(\d+\.\d+\.\d+)', version_content)
-                    if version_match:
-                        return version_match.group(1)
-        except:
-            pass
-            
-        # Default to Unknown if all else fails
-        return "unknown"
+        # Since we're using the vnmd/freesurfer_8.0.0 image, we can default to 8.0.0
+        # if we can't determine the version through normal means
+        logger.info("Using default version 8.0.0 based on Docker image name")
+        return "8.0.0"
 
 
 def get_subjects_to_analyze(layout, participant_label):

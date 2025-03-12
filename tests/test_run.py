@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock
 import sys
+import subprocess 
 
 # Add the src directory to the path
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
@@ -16,9 +17,47 @@ from run import (
     create_provenance,
     create_nidm_output,
     add_stats_to_graph,
-    get_subjects_to_analyze
+    get_subjects_to_analyze,
+    check_freesurfer_env  # Add this import
 )
 
+@patch('os.environ')
+@patch('os.path.exists')
+@patch('subprocess.check_output')
+def test_check_freesurfer_env(mock_check_output, mock_exists, mock_environ):
+    """Test checking FreeSurfer environment."""
+    # Import the function to test
+    from run import check_freesurfer_env
+    
+    # Configure mocks
+    mock_environ.get.return_value = '/license.txt'
+    mock_environ.__contains__.return_value = True  # FREESURFER_HOME exists
+    mock_exists.return_value = True  # License file exists
+    mock_check_output.return_value = b"/usr/local/bin/recon-all"  # recon-all exists in PATH
+    
+    # This should not raise any exceptions
+    check_freesurfer_env(None)
+    
+    # Test with provided license file
+    check_freesurfer_env('/custom/license.txt')
+    mock_environ.__setitem__.assert_called_with('FS_LICENSE', '/custom/license.txt')
+    
+    # Test missing FREESURFER_HOME
+    mock_environ.__contains__.return_value = False
+    with pytest.raises(SystemExit):
+        check_freesurfer_env(None)
+    
+    # Test missing license file
+    mock_environ.__contains__.return_value = True
+    mock_exists.return_value = False
+    with pytest.raises(SystemExit):
+        check_freesurfer_env(None)
+    
+    # Test recon-all not in PATH
+    mock_exists.return_value = True
+    mock_check_output.side_effect = subprocess.CalledProcessError(1, 'which recon-all')
+    with pytest.raises(SystemExit):
+        check_freesurfer_env(None)
 
 def test_create_dataset_description():
     """Test creation of dataset_description.json file."""
@@ -39,6 +78,12 @@ def test_create_dataset_description():
         assert len(data["GeneratedBy"]) == 2
         assert data["GeneratedBy"][0]["Name"] == "BIDS-FreeSurfer"
         assert data["GeneratedBy"][0]["Version"] == "0.1.0"
+        
+        # Check for container information
+        assert data["GeneratedBy"][1]["Name"] == "FreeSurfer"
+        assert "Container" in data["GeneratedBy"][1]
+        assert data["GeneratedBy"][1]["Container"]["Type"] == "docker"
+        assert data["GeneratedBy"][1]["Container"]["Tag"] == "vnmd/freesurfer_8.0.0"
 
 
 @patch('subprocess.check_output')
@@ -54,16 +99,14 @@ def test_get_freesurfer_version(mock_check_output):
     version = get_freesurfer_version()
     assert version == "7.3.2"
     
-    # Test error handling - don't test the specific version
-    # Instead just verify it returns a string that looks like a version
+    # Test error handling with Docker image
+    # When using the Docker image, we should default to "8.0.0"
     mock_check_output.side_effect = Exception("Command failed")
     version = get_freesurfer_version()
     
-    # Check that it returns something that looks like a version string
-    # or the string "unknown"
-    import re
-    assert re.match(r'^(\d+\.\d+\.\d+|unknown)$', version), f"Expected version string or 'unknown', got '{version}'"
-    
+    # For the Docker-based approach, we expect "8.0.0" as the fallback
+    assert version == "8.0.0"
+
 def test_create_provenance():
     """Test creation of provenance files."""
     with tempfile.TemporaryDirectory() as tmpdir:

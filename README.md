@@ -27,7 +27,7 @@ The app implements:
 git clone https://github.com/yourusername/bids-freesurfer.git
 cd bids-freesurfer
 
-# Build the Docker image
+# Build the Docker image (now based on vnmd/freesurfer_8.0.0)
 docker build -t bids/freesurfer:8.0.0 .
 ```
 
@@ -69,7 +69,7 @@ docker run -v /path/to/bids_dataset:/bids_dataset:ro \
            /bids_dataset /output participant --participant_label 01
 ```
 
-Process multiple subjects in parallel (using GNU parallel):
+Process multiple subjects in parallel (using FreeSurfer's built-in parallelization):
 ```bash
 docker run -v /path/to/bids_dataset:/bids_dataset:ro \
            -v /path/to/output:/output \
@@ -129,6 +129,19 @@ The NIDM outputs are provided in JSON-LD format (`prov.jsonld`), which includes:
 - Cortical thickness and surface area measurements
 - Standard identifiers for interoperability
 
+## Implementation Notes
+
+This BIDS App uses the pre-built FreeSurfer Docker image `vnmd/freesurfer_8.0.0` from Neurodesk as its base image. Neurodesk is a containerized data analysis environment for neuroimaging that provides a suite of neuroimaging tools in Docker containers. These containers are built using Neurodocker, a command-line tool that generates custom Dockerfiles for neuroimaging software.
+
+Using the Neurodesk FreeSurfer image offers several advantages:
+
+1. Faster build times - no need to download and install FreeSurfer during build
+2. Smaller container size - uses the optimized FreeSurfer image
+3. Improved reliability - uses a verified and tested FreeSurfer installation
+4. Compatibility with FreeSurfer's license terms
+5. Standardized environment - built using the community-supported Neurodocker tool
+6. Regular maintenance - benefits from the Neurodesk project's updates and improvements
+
 ## License
 
 This BIDS App is licensed under [MIT License](LICENSE).
@@ -138,6 +151,8 @@ This BIDS App is licensed under [MIT License](LICENSE).
 - FreeSurfer (https://surfer.nmr.mgh.harvard.edu/)
 - BIDS (https://bids.neuroimaging.io/)
 - NIDM (http://nidm.nidash.org/)
+- Neurodesk (https://www.neurodesk.org/)
+- Neurodocker (https://github.com/ReproNim/neurodocker)
 
 ## References
 
@@ -146,3 +161,4 @@ If you use this BIDS App in your research, please cite:
 1. Fischl B. (2012). FreeSurfer. NeuroImage, 62(2), 774–781. https://doi.org/10.1016/j.neuroimage.2012.01.021
 2. Gorgolewski, K. J., Auer, T., Calhoun, V. D., Craddock, R. C., Das, S., Duff, E. P., Flandin, G., Ghosh, S. S., Glatard, T., Halchenko, Y. O., Handwerker, D. A., Hanke, M., Keator, D., Li, X., Michael, Z., Maumet, C., Nichols, B. N., Nichols, T. E., Pellman, J., Poline, J. B., … Poldrack, R. A. (2016). The brain imaging data structure, a format for organizing and describing outputs of neuroimaging experiments. Scientific data, 3, 160044. https://doi.org/10.1038/sdata.2016.44
 3. Maumet, C., Auer, T., Bowring, A., Chen, G., Das, S., Flandin, G., Ghosh, S., Glatard, T., Gorgolewski, K. J., Helmer, K. G., Jenkinson, M., Keator, D. B., Nichols, B. N., Poline, J. B., Reynolds, R., Sochat, V., Turner, J., & Nichols, T. E. (2016). Sharing brain mapping statistical results with the neuroimaging data model. Scientific data, 3, 160102. https://doi.org/10.1038/sdata.2016.102
+4. Renton, A.I., Dao, T.T., Johnstone, T. et al. Neurodesk: an accessible, flexible and portable data analysis environment for reproducible neuroimaging. Nat Methods 21, 804–808 (2024). https://doi.org/10.1038/s41592-023-02145-x
