@@ -1,0 +1,294 @@
+{
+    "@context": {
+      "fs": "http://surfer.nmr.mgh.harvard.edu/fs/terms/",
+      "nidm": "http://purl.org/nidash/nidm#",
+      "prov": "http://www.w3.org/ns/prov#",
+      "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+      "owl": "http://www.w3.org/2002/07/owl#",
+      "xsd": "http://www.w3.org/2001/XMLSchema#",
+      "dct": "http://purl.org/dc/terms/",
+      "fma": "http://purl.org/sig/ont/fma/"
+    },
+    
+    "@id": "fs:FreeSurferTerms",
+    "@type": "nidm:TermSet",
+    "rdfs:label": "FreeSurfer Common Data Elements",
+    "dct:description": "Common Data Elements for FreeSurfer neuroimaging analysis",
+    "dct:created": "2025-03-11",
+    "dct:creator": "BIDS FreeSurfer App",
+    "dct:version": "0.1.0",
+    
+    "classes": [
+      {
+        "@id": "fs:SegmentationStatistics",
+        "@type": "owl:Class",
+        "rdfs:label": "FreeSurfer Segmentation Statistics",
+        "rdfs:comment": "Statistics derived from FreeSurfer volumetric segmentation",
+        "rdfs:subClassOf": "nidm:SegmentationStatistics"
+      },
+      {
+        "@id": "fs:CorticalParcellationStatistics",
+        "@type": "owl:Class",
+        "rdfs:label": "FreeSurfer Cortical Parcellation Statistics",
+        "rdfs:comment": "Statistics derived from FreeSurfer cortical parcellation",
+        "rdfs:subClassOf": "nidm:ParcellationStatistics"
+      },
+      {
+        "@id": "fs:BrainStructure",
+        "@type": "owl:Class",
+        "rdfs:label": "Brain Structure",
+        "rdfs:comment": "A segmented brain structure from FreeSurfer analysis",
+        "rdfs:subClassOf": "nidm:AnatomicalRegion"
+      },
+      {
+        "@id": "fs:CorticalRegion",
+        "@type": "owl:Class",
+        "rdfs:label": "Cortical Region",
+        "rdfs:comment": "A parcellated cortical region from FreeSurfer analysis",
+        "rdfs:subClassOf": "fs:BrainStructure"
+      },
+      {
+        "@id": "fs:Measurement",
+        "@type": "owl:Class",
+        "rdfs:label": "FreeSurfer Measurement",
+        "rdfs:comment": "A measurement derived from FreeSurfer analysis",
+        "rdfs:subClassOf": "nidm:Measurement"
+      },
+      {
+        "@id": "fs:SpecializedStatistics",
+        "@type": "owl:Class",
+        "rdfs:label": "FreeSurfer Specialized Statistics",
+        "rdfs:comment": "Additional specialized statistics from FreeSurfer analysis",
+        "rdfs:subClassOf": "nidm:Statistics"
+      },
+      {
+        "@id": "fs:StatisticsItem",
+        "@type": "owl:Class",
+        "rdfs:label": "FreeSurfer Statistics Item",
+        "rdfs:comment": "An individual item in a FreeSurfer statistics collection",
+        "rdfs:subClassOf": "nidm:DataElement"
+      }
+    ],
+    
+    "properties": [
+      {
+        "@id": "fs:volume",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "volume",
+        "rdfs:comment": "Volume of a brain structure in cubic millimeters",
+        "rdfs:domain": "fs:BrainStructure",
+        "rdfs:range": "xsd:float",
+        "owl:equivalentProperty": "nidm:volume"
+      },
+      {
+        "@id": "fs:surface_area",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "surface area",
+        "rdfs:comment": "Surface area in square millimeters",
+        "rdfs:domain": "fs:CorticalRegion",
+        "rdfs:range": "xsd:float",
+        "owl:equivalentProperty": "nidm:surfaceArea"
+      },
+      {
+        "@id": "fs:thickness",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "thickness",
+        "rdfs:comment": "Cortical thickness in millimeters",
+        "rdfs:domain": "fs:CorticalRegion",
+        "rdfs:range": "xsd:float",
+        "owl:equivalentProperty": "nidm:thickness"
+      },
+      {
+        "@id": "fs:curvature",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "curvature",
+        "rdfs:comment": "Surface curvature",
+        "rdfs:domain": "fs:CorticalRegion",
+        "rdfs:range": "xsd:float",
+        "owl:equivalentProperty": "nidm:curvature"
+      },
+      {
+        "@id": "fs:hasSegmentationStatistics",
+        "@type": "owl:ObjectProperty",
+        "rdfs:label": "has segmentation statistics",
+        "rdfs:comment": "Links a subject to FreeSurfer segmentation statistics",
+        "rdfs:domain": "prov:Entity",
+        "rdfs:range": "fs:SegmentationStatistics"
+      },
+      {
+        "@id": "fs:hasCorticalParcellationStatistics",
+        "@type": "owl:ObjectProperty",
+        "rdfs:label": "has cortical parcellation statistics",
+        "rdfs:comment": "Links a subject to FreeSurfer cortical parcellation statistics",
+        "rdfs:domain": "prov:Entity",
+        "rdfs:range": "fs:CorticalParcellationStatistics"
+      },
+      {
+        "@id": "fs:hasSpecializedStatistics",
+        "@type": "owl:ObjectProperty",
+        "rdfs:label": "has specialized statistics",
+        "rdfs:comment": "Links a subject to specialized FreeSurfer statistics",
+        "rdfs:domain": "prov:Entity",
+        "rdfs:range": "fs:SpecializedStatistics"
+      },
+      {
+        "@id": "fs:hasStructure",
+        "@type": "owl:ObjectProperty",
+        "rdfs:label": "has structure",
+        "rdfs:comment": "Links statistics to a brain structure",
+        "rdfs:domain": "fs:SegmentationStatistics",
+        "rdfs:range": "fs:BrainStructure"
+      },
+      {
+        "@id": "fs:hasRegion",
+        "@type": "owl:ObjectProperty",
+        "rdfs:label": "has region",
+        "rdfs:comment": "Links statistics to a cortical region",
+        "rdfs:domain": "fs:CorticalParcellationStatistics",
+        "rdfs:range": "fs:CorticalRegion"
+      },
+      {
+        "@id": "fs:hasItem",
+        "@type": "owl:ObjectProperty",
+        "rdfs:label": "has item",
+        "rdfs:comment": "Links statistics to an individual measurement item",
+        "rdfs:domain": "fs:SpecializedStatistics",
+        "rdfs:range": "fs:StatisticsItem"
+      },
+      {
+        "@id": "fs:value",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "value",
+        "rdfs:comment": "The numeric value of a measurement",
+        "rdfs:domain": "fs:Measurement",
+        "rdfs:range": "xsd:float"
+      },
+      {
+        "@id": "fs:hemisphere",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "hemisphere",
+        "rdfs:comment": "Brain hemisphere (left or right)",
+        "rdfs:domain": [
+          "fs:CorticalRegion", 
+          "fs:CorticalParcellationStatistics"
+        ],
+        "rdfs:range": "xsd:string"
+      },
+      {
+        "@id": "fs:atlas",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "atlas",
+        "rdfs:comment": "Parcellation atlas used (e.g., 'aparc', 'a2009s')",
+        "rdfs:domain": [
+          "fs:CorticalRegion", 
+          "fs:CorticalParcellationStatistics"
+        ],
+        "rdfs:range": "xsd:string"
+      },
+      {
+        "@id": "fs:index",
+        "@type": "owl:DatatypeProperty",
+        "rdfs:label": "index",
+        "rdfs:comment": "Numeric index of the structure in the FreeSurfer segmentation",
+        "rdfs:domain": "fs:BrainStructure",
+        "rdfs:range": "xsd:integer"
+      }
+    ],
+    
+    "statistics": [
+      {
+        "@id": "fs:EstimatedTotalIntraCranialVol",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Estimated Total Intracranial Volume",
+        "rdfs:comment": "Total volume within the cranium, including brain tissue, CSF, and meninges",
+        "fs:unit": "mm^3",
+        "owl:equivalentClass": "nidm:IntraCranialVolume"
+      },
+      {
+        "@id": "fs:BrainSegVol",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Brain Segmentation Volume",
+        "rdfs:comment": "Total volume of brain tissue, including cerebrum, cerebellum, and brainstem",
+        "fs:unit": "mm^3",
+        "owl:equivalentClass": "nidm:BrainVolume"
+      },
+      {
+        "@id": "fs:BrainSegVolNotVent",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Brain Segmentation Volume Without Ventricles",
+        "rdfs:comment": "Brain volume excluding ventricles",
+        "fs:unit": "mm^3",
+        "owl:equivalentClass": "nidm:BrainVolumeExcludingVentricles"
+      },
+      {
+        "@id": "fs:CortexVol",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Cortical Gray Matter Volume",
+        "rdfs:comment": "Total volume of the cerebral cortex",
+        "fs:unit": "mm^3",
+        "owl:equivalentClass": "nidm:CorticalVolume"
+      },
+      {
+        "@id": "fs:ThickAvg",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Average Thickness",
+        "rdfs:comment": "Average cortical thickness of a region",
+        "fs:unit": "mm",
+        "owl:equivalentClass": "nidm:CorticalThickness"
+      },
+      {
+        "@id": "fs:SurfArea",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Surface Area",
+        "rdfs:comment": "Surface area of a cortical region",
+        "fs:unit": "mm^2",
+        "owl:equivalentClass": "nidm:SurfaceArea"
+      },
+      {
+        "@id": "fs:GrayVol",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Gray Matter Volume",
+        "rdfs:comment": "Volume of gray matter in a cortical region",
+        "fs:unit": "mm^3",
+        "owl:equivalentClass": "nidm:GrayMatterVolume"
+      },
+      {
+        "@id": "fs:NumVert",
+        "@type": "fs:Measurement",
+        "rdfs:label": "Number of Vertices",
+        "rdfs:comment": "Number of vertices in the surface mesh of a cortical region",
+        "fs:unit": "count",
+        "owl:equivalentClass": "nidm:VertexCount"
+      }
+    ],
+    
+    "atlases": [
+      {
+        "@id": "fs:DKAtlas",
+        "@type": "nidm:Atlas",
+        "rdfs:label": "Desikan-Killiany Atlas",
+        "rdfs:comment": "FreeSurfer's Desikan-Killiany cortical parcellation atlas",
+        "dct:identifier": "aparc",
+        "dct:creator": "Desikan RS, Ségonne F, Fischl B, et al.",
+        "dct:source": "https://doi.org/10.1016/j.neuroimage.2006.01.021"
+      },
+      {
+        "@id": "fs:DestrieuxAtlas",
+        "@type": "nidm:Atlas",
+        "rdfs:label": "Destrieux Atlas",
+        "rdfs:comment": "FreeSurfer's Destrieux cortical parcellation atlas",
+        "dct:identifier": "a2009s",
+        "dct:creator": "Destrieux C, Fischl B, Dale A, et al.",
+        "dct:source": "https://doi.org/10.1016/j.neuroimage.2010.06.010"
+      },
+      {
+        "@id": "fs:AsegAtlas",
+        "@type": "nidm:Atlas",
+        "rdfs:label": "FreeSurfer Subcortical Segmentation Atlas",
+        "rdfs:comment": "FreeSurfer's automatic subcortical segmentation atlas",
+        "dct:identifier": "aseg",
+        "dct:creator": "Fischl B, et al.",
+        "dct:source": "https://doi.org/10.1016/j.neuroimage.2002.09.026"
+      }
+    ]
+  }

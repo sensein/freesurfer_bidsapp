@@ -1,0 +1,485 @@
+{
+    "metadata": {
+      "description": "Mapping between FreeSurfer terms and standard neuroimaging ontology terms",
+      "version": "0.1.0",
+      "created": "2025-03-11"
+    },
+    
+    "regions": {
+      "left_lateral_ventricle": {
+        "freesurfer_term": "Left-Lateral-Ventricle",
+        "standard_term": "http://purl.org/sig/ont/fma/fma7394",
+        "label": "Left lateral ventricle",
+        "category": "ventricle",
+        "hemisphere": "left"
+      },
+      "right_lateral_ventricle": {
+        "freesurfer_term": "Right-Lateral-Ventricle",
+        "standard_term": "http://purl.org/sig/ont/fma/fma7395",
+        "label": "Right lateral ventricle",
+        "category": "ventricle",
+        "hemisphere": "right"
+      },
+      "left_cerebral_white_matter": {
+        "freesurfer_term": "Left-Cerebral-White-Matter",
+        "standard_term": "http://purl.org/sig/ont/fma/fma256871",
+        "label": "Left cerebral white matter",
+        "category": "white_matter",
+        "hemisphere": "left"
+      },
+      "right_cerebral_white_matter": {
+        "freesurfer_term": "Right-Cerebral-White-Matter",
+        "standard_term": "http://purl.org/sig/ont/fma/fma256872",
+        "label": "Right cerebral white matter",
+        "category": "white_matter",
+        "hemisphere": "right"
+      },
+      "left_cerebral_cortex": {
+        "freesurfer_term": "Left-Cerebral-Cortex",
+        "standard_term": "http://purl.org/sig/ont/fma/fma224992",
+        "label": "Left cerebral cortex",
+        "category": "gray_matter",
+        "hemisphere": "left"
+      },
+      "right_cerebral_cortex": {
+        "freesurfer_term": "Right-Cerebral-Cortex",
+        "standard_term": "http://purl.org/sig/ont/fma/fma224993",
+        "label": "Right cerebral cortex",
+        "category": "gray_matter",
+        "hemisphere": "right"
+      },
+      "left_hippocampus": {
+        "freesurfer_term": "Left-Hippocampus",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275020",
+        "label": "Left hippocampus",
+        "category": "subcortical",
+        "hemisphere": "left"
+      },
+      "right_hippocampus": {
+        "freesurfer_term": "Right-Hippocampus",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275021",
+        "label": "Right hippocampus",
+        "category": "subcortical",
+        "hemisphere": "right"
+      },
+      "left_thalamus": {
+        "freesurfer_term": "Left-Thalamus-Proper",
+        "standard_term": "http://purl.org/sig/ont/fma/fma283666",
+        "label": "Left thalamus",
+        "category": "subcortical",
+        "hemisphere": "left"
+      },
+      "right_thalamus": {
+        "freesurfer_term": "Right-Thalamus-Proper",
+        "standard_term": "http://purl.org/sig/ont/fma/fma283667",
+        "label": "Right thalamus",
+        "category": "subcortical",
+        "hemisphere": "right"
+      },
+      "left_caudate": {
+        "freesurfer_term": "Left-Caudate",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275030",
+        "label": "Left caudate nucleus",
+        "category": "subcortical",
+        "hemisphere": "left"
+      },
+      "right_caudate": {
+        "freesurfer_term": "Right-Caudate",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275031",
+        "label": "Right caudate nucleus",
+        "category": "subcortical",
+        "hemisphere": "right"
+      },
+      "left_putamen": {
+        "freesurfer_term": "Left-Putamen",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275035",
+        "label": "Left putamen",
+        "category": "subcortical",
+        "hemisphere": "left"
+      },
+      "right_putamen": {
+        "freesurfer_term": "Right-Putamen",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275036",
+        "label": "Right putamen",
+        "category": "subcortical",
+        "hemisphere": "right"
+      },
+      "left_amygdala": {
+        "freesurfer_term": "Left-Amygdala",
+        "standard_term": "http://purl.org/sig/ont/fma/fma279113",
+        "label": "Left amygdala",
+        "category": "subcortical",
+        "hemisphere": "left"
+      },
+      "right_amygdala": {
+        "freesurfer_term": "Right-Amygdala",
+        "standard_term": "http://purl.org/sig/ont/fma/fma279114",
+        "label": "Right amygdala",
+        "category": "subcortical",
+        "hemisphere": "right"
+      },
+      "brainstem": {
+        "freesurfer_term": "Brain-Stem",
+        "standard_term": "http://purl.org/sig/ont/fma/fma79876",
+        "label": "Brainstem",
+        "category": "brainstem"
+      },
+      "left_accumbens": {
+        "freesurfer_term": "Left-Accumbens-area",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275448",
+        "label": "Left nucleus accumbens",
+        "category": "subcortical",
+        "hemisphere": "left"
+      },
+      "right_accumbens": {
+        "freesurfer_term": "Right-Accumbens-area",
+        "standard_term": "http://purl.org/sig/ont/fma/fma275449",
+        "label": "Right nucleus accumbens",
+        "category": "subcortical",
+        "hemisphere": "right"
+      }
+    },
+    
+    "cortical_regions": {
+      "bankssts": {
+        "freesurfer_term": "bankssts",
+        "standard_term": "http://purl.org/sig/ont/fma/fma272183",
+        "label": "Banks of the superior temporal sulcus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "caudalanteriorcingulate": {
+        "freesurfer_term": "caudalanteriorcingulate",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86590",
+        "label": "Caudal anterior cingulate cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany" 
+      },
+      "caudalmiddlefrontal": {
+        "freesurfer_term": "caudalmiddlefrontal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86597",
+        "label": "Caudal middle frontal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "cuneus": {
+        "freesurfer_term": "cuneus",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86889",
+        "label": "Cuneus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "entorhinal": {
+        "freesurfer_term": "entorhinal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86882",
+        "label": "Entorhinal cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "fusiform": {
+        "freesurfer_term": "fusiform",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86892",
+        "label": "Fusiform gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "inferiorparietal": {
+        "freesurfer_term": "inferiorparietal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86672",
+        "label": "Inferior parietal cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "inferiortemporal": {
+        "freesurfer_term": "inferiortemporal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86687",
+        "label": "Inferior temporal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "isthmuscingulate": {
+        "freesurfer_term": "isthmuscingulate",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86612",
+        "label": "Isthmus of cingulate gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "lateraloccipital": {
+        "freesurfer_term": "lateraloccipital",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86879",
+        "label": "Lateral occipital cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "lateralorbitofrontal": {
+        "freesurfer_term": "lateralorbitofrontal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86622",
+        "label": "Lateral orbitofrontal cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "lingual": {
+        "freesurfer_term": "lingual",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86884",
+        "label": "Lingual gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "medialorbitofrontal": {
+        "freesurfer_term": "medialorbitofrontal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86621",
+        "label": "Medial orbitofrontal cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "middletemporal": {
+        "freesurfer_term": "middletemporal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86688",
+        "label": "Middle temporal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "parahippocampal": {
+        "freesurfer_term": "parahippocampal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86881",
+        "label": "Parahippocampal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "paracentral": {
+        "freesurfer_term": "paracentral",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86640",
+        "label": "Paracentral lobule",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "parsopercularis": {
+        "freesurfer_term": "parsopercularis",
+        "standard_term": "http://purl.org/sig/ont/fma/fma72651",
+        "label": "Pars opercularis",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "parsorbitalis": {
+        "freesurfer_term": "parsorbitalis",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86616",
+        "label": "Pars orbitalis",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "parstriangularis": {
+        "freesurfer_term": "parstriangularis",
+        "standard_term": "http://purl.org/sig/ont/fma/fma72649",
+        "label": "Pars triangularis",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "pericalcarine": {
+        "freesurfer_term": "pericalcarine",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86885",
+        "label": "Pericalcarine cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "postcentral": {
+        "freesurfer_term": "postcentral",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86670",
+        "label": "Postcentral gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "posteriorcingulate": {
+        "freesurfer_term": "posteriorcingulate",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86613",
+        "label": "Posterior cingulate cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "precentral": {
+        "freesurfer_term": "precentral",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86641",
+        "label": "Precentral gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "precuneus": {
+        "freesurfer_term": "precuneus",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86675",
+        "label": "Precuneus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "rostralanteriorcingulate": {
+        "freesurfer_term": "rostralanteriorcingulate",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86615",
+        "label": "Rostral anterior cingulate cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "rostralmiddlefrontal": {
+        "freesurfer_term": "rostralmiddlefrontal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86596",
+        "label": "Rostral middle frontal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "superiorfrontal": {
+        "freesurfer_term": "superiorfrontal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86594",
+        "label": "Superior frontal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "superiorparietal": {
+        "freesurfer_term": "superiorparietal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86671",
+        "label": "Superior parietal cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "superiortemporal": {
+        "freesurfer_term": "superiortemporal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86686",
+        "label": "Superior temporal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "supramarginal": {
+        "freesurfer_term": "supramarginal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86673",
+        "label": "Supramarginal gyrus",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "frontalpole": {
+        "freesurfer_term": "frontalpole",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86608",
+        "label": "Frontal pole",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "temporalpole": {
+        "freesurfer_term": "temporalpole",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86684",
+        "label": "Temporal pole",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      },
+      "transversetemporal": {
+        "freesurfer_term": "transversetemporal",
+        "standard_term": "http://purl.org/sig/ont/fma/fma86791",
+        "label": "Transverse temporal cortex",
+        "category": "cortical_region",
+        "atlas": "desikan_killiany"
+      }
+    },
+  
+    "metrics": {
+      "volume": {
+        "freesurfer_term": "Volume_mm3",
+        "standard_term": "http://purl.org/nidash/nidm#Volume",
+        "label": "Volume",
+        "unit": "mm^3",
+        "datatype": "float"
+      },
+      "volume_normalized": {
+        "freesurfer_term": "Volume_Normalized",
+        "standard_term": "http://purl.org/nidash/nidm#NormalizedVolume",
+        "label": "Normalized Volume",
+        "unit": "% of ICV",
+        "datatype": "float"
+      },
+      "surface_area": {
+        "freesurfer_term": "SurfArea",
+        "standard_term": "http://purl.org/nidash/nidm#SurfaceArea",
+        "label": "Surface Area",
+        "unit": "mm^2",
+        "datatype": "float"
+      },
+      "thickness_avg": {
+        "freesurfer_term": "ThickAvg",
+        "standard_term": "http://purl.org/nidash/nidm#CorticalThickness",
+        "label": "Average Cortical Thickness",
+        "unit": "mm",
+        "datatype": "float"
+      },
+      "thickness_std": {
+        "freesurfer_term": "ThickStd",
+        "standard_term": "http://purl.org/nidash/nidm#CorticalThicknessStandardDeviation",
+        "label": "Cortical Thickness Standard Deviation",
+        "unit": "mm",
+        "datatype": "float"
+      },
+      "num_vertices": {
+        "freesurfer_term": "NumVert",
+        "standard_term": "http://purl.org/nidash/nidm#VertexCount",
+        "label": "Number of Vertices",
+        "unit": "count",
+        "datatype": "integer"
+      },
+      "mean_curvature": {
+        "freesurfer_term": "MeanCurv",
+        "standard_term": "http://purl.org/nidash/nidm#MeanCurvature",
+        "label": "Mean Curvature",
+        "unit": "mm^-1",
+        "datatype": "float"
+      },
+      "gaussian_curvature": {
+        "freesurfer_term": "GausCurv",
+        "standard_term": "http://purl.org/nidash/nidm#GaussianCurvature",
+        "label": "Gaussian Curvature",
+        "unit": "mm^-2",
+        "datatype": "float"
+      },
+      "gray_volume": {
+        "freesurfer_term": "GrayVol",
+        "standard_term": "http://purl.org/nidash/nidm#GrayMatterVolume",
+        "label": "Gray Matter Volume",
+        "unit": "mm^3",
+        "datatype": "float"
+      },
+      "icv": {
+        "freesurfer_term": "EstimatedTotalIntraCranialVol",
+        "standard_term": "http://purl.org/nidash/nidm#IntraCranialVolume",
+        "label": "Estimated Total Intracranial Volume",
+        "unit": "mm^3",
+        "datatype": "float"
+      },
+      "brain_seg_vol": {
+        "freesurfer_term": "BrainSegVol",
+        "standard_term": "http://purl.org/nidash/nidm#BrainVolume",
+        "label": "Brain Segmentation Volume",
+        "unit": "mm^3",
+        "datatype": "float"
+      },
+      "brain_seg_vol_notvent": {
+        "freesurfer_term": "BrainSegVolNotVent",
+        "standard_term": "http://purl.org/nidash/nidm#BrainVolumeExcludingVentricles",
+        "label": "Brain Segmentation Volume Without Ventricles",
+        "unit": "mm^3",
+        "datatype": "float"
+      },
+      "cortex_vol": {
+        "freesurfer_term": "CortexVol",
+        "standard_term": "http://purl.org/nidash/nidm#CorticalVolume",
+        "label": "Cortical Gray Matter Volume",
+        "unit": "mm^3",
+        "datatype": "float"
+      }
+    },
+  
+    "software": {
+      "freesurfer": {
+        "name": "FreeSurfer",
+        "standard_term": "http://uri.interlex.org/ilx_0383424",
+        "description": "Software package for analysis and visualization of structural and functional neuroimaging data from cross-sectional or longitudinal studies",
+        "website": "https://surfer.nmr.mgh.harvard.edu/"
+      },
+      "recon_all": {
+        "name": "recon-all",
+        "standard_term": "http://uri.interlex.org/ilx_0401009",
+        "description": "FreeSurfer processing pipeline that performs all steps from image registration to surface extraction and cortical parcellation",
+        "part_of": "freesurfer"
+      }
+    }
+  }
