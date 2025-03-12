@@ -26,22 +26,86 @@ The app implements:
 # Clone the repository
 git clone https://github.com/yourusername/bids-freesurfer.git
 cd bids-freesurfer
-
-# Build the Docker image (now based on vnmd/freesurfer_8.0.0)
-docker build -t bids/freesurfer:8.0.0 .
 ```
 
-## Usage
+# Container Support
 
-### Basic Command
+This BIDS App provides support for both Docker and Singularity/Apptainer, allowing you to run the application in various environments including HPC clusters.
+
+## Building Containers
+
+You can build the container images using the `setup.py` script:
 
 ```bash
-docker run -v /path/to/bids_dataset:/bids_dataset:ro \
-           -v /path/to/output:/output \
-           -v /path/to/freesurfer/license.txt:/license.txt \
-           bids/freesurfer:8.0.0 \
-           /bids_dataset /output participant
+# Build Docker image
+python setup.py docker
+
+# Build Singularity image
+python setup.py singularity
+
+# Build both container images
+python setup.py containers
+
+# You can also combine with other setup.py commands
+python setup.py docker install
 ```
+
+## Docker Usage
+
+```bash
+# Run the container
+docker run -v /path/to/license.txt:/license.txt \
+  -v /path/to/bids/data:/data \
+  -v /path/to/output:/output \
+  bids-freesurfer \
+  --bids_dir /data \
+  --output_dir /output
+```
+
+## Singularity/Apptainer Usage
+
+```bash
+# Run the container (binding the code repository)
+singularity run \
+  --bind $PWD:/app,/path/to/license.txt:/license.txt,/path/to/bids/data:/data,/path/to/output:/output \
+  freesurfer.sif \
+  --bids_dir /data \
+  --output_dir /output
+```
+
+## HPC/Cluster Usage
+
+When running on an HPC cluster that only supports Singularity/Apptainer:
+
+1. Build the Singularity image: `python setup.py singularity`
+2. Transfer the `freesurfer.sif` file to your cluster
+3. Create a job submission script like this:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=freesurfer
+#SBATCH --output=freesurfer_%j.out
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+
+# Path to the repository on the cluster
+REPO_DIR=/path/to/repo
+# Path to the Singularity image
+SIF_FILE=/path/to/freesurfer.sif
+# Path to license file
+LICENSE_FILE=/path/to/license.txt
+# Input and output paths
+BIDS_DIR=/path/to/bids/data
+OUTPUT_DIR=/path/to/output
+
+singularity run \
+  --bind $REPO_DIR:/app,$LICENSE_FILE:/license.txt,$BIDS_DIR:/data,$OUTPUT_DIR:/output \
+  $SIF_FILE \
+  --bids_dir /data \
+  --output_dir /output \
+  --participant_label sub-01 sub-02  # Add your subjects here
+```
+
 
 ### Command-Line Arguments
 

@@ -56,3 +56,35 @@ jobs:
         tags: bids/freesurfer:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+  singularity:
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Singularity
+      uses: eWaterCycle/setup-singularity@v7
+      with:
+        singularity-version: 3.8.7
+    
+    - name: Validate Singularity definition file
+      run: |
+        singularity parser Singularity
+    
+    - name: Build Singularity image from Docker
+      run: |
+        # First build the Docker image
+        docker build -t bids/freesurfer:test .
+        
+        # Then build Singularity image from the Docker image
+        singularity build --disable-cache freesurfer.sif Singularity
+        
+        # Verify the image was built
+        ls -lah freesurfer.sif
+    
+    - name: Test Singularity image help
+      run: |
+        singularity run-help freesurfer.sif
