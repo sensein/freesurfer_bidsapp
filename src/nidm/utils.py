@@ -10,8 +10,19 @@ import os
 import re
 import json
 import logging
+import tempfile
+import urllib.request as ur
 from pathlib import Path
-from rdflib import Graph, URIRef, Namespace
+from collections import namedtuple
+from io import StringIO
+
+import pandas as pd
+try:
+    from rapidfuzz import fuzz
+except ImportError:
+    fuzz = None
+
+from rdflib import Graph, URIRef, Literal, Namespace, BNode, RDF, RDFS, XSD
 
 # Configure logging
 logger = logging.getLogger('bids-freesurfer.nidm.utils')
@@ -20,7 +31,23 @@ logger = logging.getLogger('bids-freesurfer.nidm.utils')
 NIDM = Namespace("http://purl.org/nidash/nidm#")
 NIIRI = Namespace("http://iri.nidash.org/")
 FS = Namespace("http://surfer.nmr.mgh.harvard.edu/fs/terms/")
+NDAR = Namespace("https://ndar.nih.gov/api/datadictionary/v2/dataelement/")
+SIO = Namespace("http://semanticscience.org/resource/")
+NFO = Namespace("http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#")
 
+# Define FreeSurfer structure
+FSEntry = namedtuple("FSEntry", ["structure", "hemi", "measure", "unit"])
+
+# Minimum match score for fuzzy matching
+MIN_MATCH_SCORE = 30
+
+# Paths to FreeSurfer mapping files
+MODULE_DIR = Path(os.path.dirname(__file__))
+MAPPINGS_DIR = MODULE_DIR / "mappings"
+LUT_PATH = os.path.join(MAPPINGS_DIR, "FreeSurferColorLUT.txt")
+FS_MAP_PATH = os.path.join(MAPPINGS_DIR, "fsmap.json")
+FS_CDE_PATH = os.path.join(MAPPINGS_DIR, "fs_cde.json")
+FS_CDE_TTL_PATH = os.path.join(MAPPINGS_DIR, "fs_cde.ttl")
 
 def safe_id(text):
     """
@@ -245,8 +272,7 @@ def load_fs_mapping(mapping_file=None):
     """
     # Default mapping file location
     if not mapping_file:
-        module_dir = Path(__file__).parent
-        mapping_file = module_dir / 'mappings' / 'fsmap.json'
+        mapping_file = FS_MAP_PATH
     
     # If mapping file exists, load it
     if os.path.exists(mapping_file):
@@ -271,7 +297,7 @@ def map_fs_term(term, mapping_dict, category=None):
     mapping_dict : dict
         Mapping dictionary from load_fs_mapping
     category : str, optional
-        Category to restrict mapping search (e.g., 'region', 'metric')
+        Category to restrict mapping search (e.g., 'region', 'measure')
     
     Returns
     -------
@@ -284,7 +310,30 @@ def map_fs_term(term, mapping_dict, category=None):
     # Normalize the term for lookup
     norm_term = safe_id(term)
     
-    # Check if term exists in mapping
+    # First check if this is a measure
+    if category == 'measure' and 'Measures' in mapping_dict:
+        if term in mapping_dict['Measures']:
+            measure_info = mapping_dict['Measures'][term]
+            if 'measureOf' in measure_info:
+                return measure_info['measureOf']
+    
+    # Check if this is a region/structure
+    if category == 'region' and 'Structures' in mapping_dict:
+        # First check for direct match
+        if term in mapping_dict['Structures']:
+            struct_info = mapping_dict['Structures'][term]
+            if 'isAbout' in struct_info and struct_info['isAbout']:
+                if not struct_info['isAbout'].startswith('CUSTOM') and not struct_info['isAbout'].startswith('<UNKNOWN'):
+                    return struct_info['isAbout']
+        
+        # Check for match in fskey lists
+        for struct_name, struct_info in mapping_dict['Structures'].items():
+            if 'fskey' in struct_info and term in struct_info['fskey']:
+                if 'isAbout' in struct_info and struct_info['isAbout']:
+                    if not struct_info['isAbout'].startswith('CUSTOM') and not struct_info['isAbout'].startswith('<UNKNOWN'):
+                        return struct_info['isAbout']
+    
+    # Legacy approach for simpler mappings
     if norm_term in mapping_dict:
         entry = mapping_dict[norm_term]
         
@@ -296,6 +345,472 @@ def map_fs_term(term, mapping_dict, category=None):
         return entry.get('standard_term', None)
     
     return None
+
+
+def get_segid(filename, structure):
+    """
+    Get the segmentation ID of a FreeSurfer structure
+    
+    Parameters
+    ----------
+    filename : str
+        Path to the stats file
+    structure : str
+        Structure name
+    
+    Returns
+    -------
+    int or None
+        Segmentation ID if found, otherwise None
+    """
+    structure = structure.replace("&", "_and_")
+    filename = str(filename)
+    label = structure
+    
+    # Determine hemisphere and adjust label
+    hemi = None
+    if "lh" in filename:
+        hemi = "lh"
+    if "rh" in filename:
+        hemi = "rh"
+        
+    # Handle special file formats
+    if hemi and ("aparc.stats" in filename or "a2005" in filename or "DKT" in filename or 
+        "aparc.pial" in filename or "w-g.pct" in filename):
+        label = f"ctx-{hemi}-{structure}"
+        
+    if hemi and "a2009" in filename:
+        label = f"ctx_{hemi}_{structure}"
+        
+    if "BA" in filename:
+        label = structure.split("_exvivo")[0]
+    
+    # Look up in the color table
+    try:
+        if os.path.exists(LUT_PATH):
+            with open(LUT_PATH, "rt") as fp:
+                for line in fp.readlines():
+                    if line.startswith('#') or not line.strip():
+                        continue
+                    vals = line.split()
+                    if len(vals) > 2 and vals[1] == label:
+                        return int(vals[0])
+    except Exception as e:
+        logger.warning(f"Error finding segID for {filename} - {structure}: {e}")
+    
+    return None
+
+
+def url_validator(url):
+    """
+    Validate a URL.
+    
+    Parameters
+    ----------
+    url : str
+        URL to validate
+    
+    Returns
+    -------
+    bool
+        True if URL is valid, False otherwise
+    """
+    try:
+        from urllib.parse import urlparse
+        result = urlparse(url)
+        return all([result.scheme, result.netloc, result.path])
+    except:
+        return False
+
+
+def find_matching_terms(term, cde_graph, type="measure", threshold=MIN_MATCH_SCORE):
+    """
+    Find matching terms in a CDE graph using fuzzy matching.
+    
+    Parameters
+    ----------
+    term : str
+        The term to match
+    cde_graph : Graph
+        RDFLib graph containing CDE definitions
+    type : str, optional
+        Type of term to match (measure or region)
+    threshold : int, optional
+        Minimum match score (0-100)
+    
+    Returns
+    -------
+    list
+        List of matching URIs, ordered by match score
+    """
+    if not cde_graph or not fuzz:
+        return []
+    
+    # Query for term labels
+    query = '''
+        PREFIX fs: <http://surfer.nmr.mgh.harvard.edu/fs/terms/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        
+        SELECT ?uri ?label
+        WHERE {
+            ?uri a fs:DataElement ;
+                 rdfs:label ?label .
+        }
+    '''
+    
+    qres = cde_graph.query(query)
+    
+    # Calculate match scores
+    matches = {}
+    for row in qres:
+        uri = str(row[0])
+        label = str(row[1]).lower()
+        
+        score = fuzz.token_sort_ratio(term.lower(), label)
+        
+        if score >= threshold:
+            matches[uri] = score
+    
+    # Sort by score (highest first)
+    return [k for k, v in sorted(matches.items(), key=lambda item: item[1], reverse=True)]
+
+
+def create_cde_graph(fs_mapping=None):
+    """
+    Create a graph containing FreeSurfer Common Data Elements.
+    
+    Parameters
+    ----------
+    fs_mapping : dict, optional
+        FreeSurfer mapping dictionary
+    
+    Returns
+    -------
+    Graph
+        RDFLib graph with CDE definitions
+    """
+    # If CDE TTL file exists, load it directly
+    if os.path.exists(FS_CDE_TTL_PATH):
+        try:
+            g = Graph()
+            g.parse(FS_CDE_TTL_PATH, format="turtle")
+            logger.info(f"Loaded CDE graph from {FS_CDE_TTL_PATH}")
+            return g
+        except Exception as e:
+            logger.warning(f"Error loading CDE TTL file: {e}. Will create graph from scratch.")
+    
+    # Otherwise, create the graph from scratch
+    g = Graph()
+    
+    # Bind namespaces
+    g.bind("fs", FS)
+    g.bind("nidm", NIDM)
+    g.bind("rdfs", RDFS)
+    g.bind("xsd", XSD)
+    
+    # Define relationship between FS DataElement and NIDM DataElement
+    g.add((FS["DataElement"], RDFS.subClassOf, NIDM["DataElement"]))
+    
+    # If fs_cde.json exists, load and process it
+    if os.path.exists(FS_CDE_PATH):
+        try:
+            with open(FS_CDE_PATH, 'r') as f:
+                fs_cde = json.load(f)
+            
+            # Add each CDE
+            for key, value in fs_cde.items():
+                if key == "count":
+                    continue
+                
+                cde_id = f"fs_{value['id']}"
+                g.add((FS[cde_id], RDF.type, FS["DataElement"]))
+                
+                # Add properties
+                for prop, val in value.items():
+                    if prop == "id" or val is None:
+                        continue
+                        
+                    if prop == "label":
+                        g.add((FS[cde_id], RDFS.label, Literal(val)))
+                    elif prop == "description":
+                        g.add((FS[cde_id], RDFS.comment, Literal(val)))
+                    elif prop in ["isAbout", "datumType", "measureOf"]:
+                        g.add((FS[cde_id], NIDM[prop], URIRef(val)))
+                    elif prop == "hasUnit":
+                        g.add((FS[cde_id], NIDM[prop], Literal(val)))
+                    else:
+                        g.add((FS[cde_id], FS[prop], Literal(val)))
+        except Exception as e:
+            logger.warning(f"Error loading CDE file: {e}")
+    
+    # If mapping provided, add information from fsmap.json
+    if fs_mapping:
+        try:
+            # Add measures
+            if "Measures" in fs_mapping:
+                for measure_name, measure_info in fs_mapping["Measures"].items():
+                    measure_id = f"measure_{safe_id(measure_name)}"
+                    g.add((FS[measure_id], RDF.type, FS["Measure"]))
+                    g.add((FS[measure_id], RDFS.label, Literal(measure_name)))
+                    
+                    for prop, val in measure_info.items():
+                        if val is None:
+                            continue
+                            
+                        if prop == "measureOf":
+                            if val.startswith("fs:"):
+                                val = FS[val.replace("fs:", "")]
+                            else:
+                                val = URIRef(val)
+                            g.add((FS[measure_id], NIDM.measureOf, val))
+                        elif prop == "datumType":
+                            g.add((FS[measure_id], NIDM.datumType, URIRef(val)))
+                        elif prop == "hasUnit" or prop == "fsunit":
+                            if isinstance(val, str) and val.startswith("fs:"):
+                                unit_val = FS[val.replace("fs:", "")]
+                            else:
+                                unit_val = Literal(val)
+                            g.add((FS[measure_id], NIDM.hasUnit, unit_val))
+            
+            # Add structures
+            if "Structures" in fs_mapping:
+                for struct_name, struct_info in fs_mapping["Structures"].items():
+                    struct_id = f"struct_{safe_id(struct_name)}"
+                    g.add((FS[struct_id], RDF.type, FS["Structure"]))
+                    g.add((FS[struct_id], RDFS.label, Literal(struct_name)))
+                    
+                    if "isAbout" in struct_info and struct_info["isAbout"]:
+                        if not (isinstance(struct_info["isAbout"], str) and 
+                                (struct_info["isAbout"].startswith("CUSTOM") or 
+                                 struct_info["isAbout"].startswith("<UNKNOWN"))):
+                            g.add((FS[struct_id], NIDM.isAbout, URIRef(struct_info["isAbout"])))
+                    
+                    if "fskey" in struct_info:
+                        for key in struct_info["fskey"]:
+                            g.add((FS[struct_id], FS.fskey, Literal(key)))
+                            
+                            # Handle hemispheric information
+                            if key.startswith("Left-") or key.startswith("lh"):
+                                g.add((FS[struct_id], NIDM.hasLaterality, Literal("Left")))
+                            elif key.startswith("Right-") or key.startswith("rh"):
+                                g.add((FS[struct_id], NIDM.hasLaterality, Literal("Right")))
+        
+        except Exception as e:
+            logger.warning(f"Error processing mapping: {e}")
+            
+    # Save the graph to turtle format for future use
+    try:
+        g.serialize(destination=FS_CDE_TTL_PATH, format="turtle")
+        logger.info(f"Saved CDE graph to {FS_CDE_TTL_PATH}")
+    except Exception as e:
+        logger.warning(f"Error saving CDE graph: {e}")
+    
+    return g
+
+
+def get_measure_details(measure_name, fs_mapping=None):
+    """
+    Get detailed information about a FreeSurfer measure.
+    
+    Parameters
+    ----------
+    measure_name : str
+        Name of the FreeSurfer measure
+    fs_mapping : dict, optional
+        FreeSurfer mapping dictionary
+    
+    Returns
+    -------
+    dict
+        Dictionary with measure details
+    """
+    if not fs_mapping:
+        fs_mapping = load_fs_mapping()
+    
+    if not fs_mapping or 'Measures' not in fs_mapping:
+        return {}
+    
+    # Check for direct match
+    if measure_name in fs_mapping['Measures']:
+        return fs_mapping['Measures'][measure_name]
+    
+    # Try some common variations
+    variations = [
+        measure_name.lower(),
+        measure_name.upper(),
+        measure_name.replace('-', '_'),
+        measure_name.replace('_', '-')
+    ]
+    
+    for var in variations:
+        if var in fs_mapping['Measures']:
+            return fs_mapping['Measures'][var]
+    
+    return {}
+
+
+def get_structure_details(structure_name, fs_mapping=None):
+    """
+    Get detailed information about a FreeSurfer structure.
+    
+    Parameters
+    ----------
+    structure_name : str
+        Name of the FreeSurfer structure
+    fs_mapping : dict, optional
+        FreeSurfer mapping dictionary
+    
+    Returns
+    -------
+    dict
+        Dictionary with structure details
+    """
+    if not fs_mapping:
+        fs_mapping = load_fs_mapping()
+    
+    if not fs_mapping or 'Structures' not in fs_mapping:
+        return {}
+    
+    # Check for direct match
+    if structure_name in fs_mapping['Structures']:
+        return fs_mapping['Structures'][structure_name]
+    
+    # Check if this is in any structure's fskey list
+    for struct_name, struct_info in fs_mapping['Structures'].items():
+        if 'fskey' in struct_info and structure_name in struct_info['fskey']:
+            return struct_info
+    
+    # Remove hemisphere prefix and try again
+    clean_name = structure_name
+    for prefix in ['Left-', 'Right-', 'lh-', 'rh-']:
+        if structure_name.startswith(prefix):
+            clean_name = structure_name[len(prefix):]
+            break
+    
+    if clean_name != structure_name and clean_name in fs_mapping['Structures']:
+        return fs_mapping['Structures'][clean_name]
+    
+    return {}
+
+
+def convert_stats_to_nidm(stats_data):
+    """
+    Convert FreeSurfer stats to NIDM entities
+    
+    Parameters
+    ----------
+    stats_data : list
+        List of tuples (id, value)
+    
+    Returns
+    -------
+    tuple
+        (entity, document) pair
+    """
+    try:
+        from nidm.core import Constants
+        from nidm.experiment.Core import getUUID
+        import prov.model as prov
+        
+        # Set up namespaces
+        fs = prov.Namespace("fs", str(Constants.FREESURFER))
+        niiri = prov.Namespace("niiri", str(Constants.NIIRI))
+        nidm_ns = prov.Namespace("nidm", "http://purl.org/nidash/nidm#")
+        
+        # Create document
+        doc = prov.ProvDocument()
+        
+        # Create entity
+        entity_id = niiri[getUUID()]
+        entity = doc.entity(identifier=entity_id)
+        entity.add_asserted_type(nidm_ns["FSStatsCollection"])
+        
+        # Add attributes
+        entity.add_attributes({
+            fs[f"fs_{val[0]}"]: prov.Literal(
+                val[1],
+                datatype=prov.XSD["float"] if "." in str(val[1]) else prov.XSD["integer"]
+            )
+            for val in stats_data
+        })
+        
+        return entity, doc
+        
+    except ImportError:
+        logger.warning("PyNIDM not available. Cannot convert stats to NIDM.")
+        return None, None
+
+
+def convert_csv_stats_to_nidm(row, var_to_cde_mapping, filename, id_column):
+    """
+    Convert CSV-based FreeSurfer stats to NIDM
+    
+    Parameters
+    ----------
+    row : pandas.Series
+        Row of data from CSV
+    var_to_cde_mapping : dict
+        Mapping from variables to CDEs
+    filename : str
+        Source filename
+    id_column : str
+        Column containing subject IDs
+    
+    Returns
+    -------
+    tuple
+        (entity, document) pair
+    """
+    try:
+        from nidm.core import Constants
+        from nidm.experiment.Core import getUUID
+        from nidm.core.Constants import DD
+        import prov.model as prov
+        
+        # Set up namespaces
+        fs = prov.Namespace("fs", str(Constants.FREESURFER))
+        niiri = prov.Namespace("niiri", str(Constants.NIIRI))
+        nidm_ns = prov.Namespace("nidm", "http://purl.org/nidash/nidm#")
+        nfo = prov.Namespace("nfo", "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#")
+        
+        # Create document
+        doc = prov.ProvDocument()
+        
+        # Create entity
+        entity_id = niiri[getUUID()]
+        entity = doc.entity(identifier=entity_id)
+        entity.add_asserted_type(nidm_ns["FSStatsCollection"])
+        
+        # Add filename
+        entity.add_attributes({nfo["filename"]: prov.Literal(filename)})
+        
+        # Add measurements
+        for colname, colval in row.items():
+            if colname == id_column:
+                continue
+            
+            if pd.isna(colval):
+                continue
+                
+            # Create tuple for lookup
+            current_tuple = str(DD(source=filename, variable=colname))
+            
+            if current_tuple in var_to_cde_mapping:
+                cde_id = var_to_cde_mapping[current_tuple]['sameAs'].rsplit('/', 1)[-1]
+                
+                # Add value with appropriate datatype
+                entity.add_attributes({
+                    fs[cde_id]: prov.Literal(
+                        colval,
+                        datatype=prov.XSD["float"] if "." in str(colval) else prov.XSD["integer"]
+                    )
+                })
+        
+        return entity, doc
+        
+    except ImportError:
+        logger.warning("PyNIDM not available. Cannot convert CSV stats to NIDM.")
+        return None, None
 
 
 def stats_files_exist(fs_subject_dir):
