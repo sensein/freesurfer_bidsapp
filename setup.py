@@ -83,6 +83,7 @@ setup(
         "pandas>=1.3.0",
         "prov>=2.0.0",
         "rdflib>=6.0.0",
+        'rapidfuzz>=2.0.0',
         "PyLD>=2.0.0",
     ],
     python_requires=">=3.9",
