@@ -14,7 +14,6 @@ import logging
 import datetime
 import re
 import sys
-import glob
 import tempfile
 import urllib.request as ur
 from urllib.parse import urlparse
@@ -26,6 +25,7 @@ import pandas as pd
 from rapidfuzz import fuzz
 from rdflib import Graph, URIRef, Literal, Namespace, BNode
 from rdflib.namespace import RDF, RDFS, XSD, PROV, DCTERMS
+from rdflib.util import guess_format
 
 # Import utility functions
 from src.nidm.utils import parse_fs_stats_file, safe_id, load_fs_mapping, map_fs_term
@@ -775,7 +775,7 @@ def convert_from_csv(csv_file, id_field, output_dir, json_map=None, add_to_nidm=
         # Create or load NIDM graph
         if add_to_nidm:
             graph = Graph()
-            graph.parse(add_to_nidm, format=util.guess_format(add_to_nidm))
+            graph.parse(add_to_nidm, format=guess_format(add_to_nidm))
         else:
             graph = Graph()
             graph.bind("nidm", NIDM)
