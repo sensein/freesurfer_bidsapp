@@ -7,4 +7,4 @@ for FreeSurfer outputs in BIDS-compliant derivatives.
 
 from .provenance import BIDSProvenance, create_bids_provenance
 
-__all__ = ['BIDSProvenance', 'create_bids_provenance']
+__all__ = ["BIDSProvenance", "create_bids_provenance"]

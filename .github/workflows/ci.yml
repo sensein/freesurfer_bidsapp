@@ -11,45 +11,45 @@ jobs:
     # Skip the workflow if the commit message contains [skip CI]
     if: "!contains(github.event.head_commit.message, '[skip CI]')"
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
-        
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest pytest-cov flake8
         pip install -e .
-        
+
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-        
+
     - name: Test with pytest
       run: |
         # Skip the problematic test_run.py file for now
         pytest --cov=src tests/ -k "not test_run.py"
-        
+
   docker:
     runs-on: ubuntu-latest
     needs: test
     if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip CI]')"
-    
+
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
-      
+
     - name: Build Docker image
       uses: docker/build-push-action@v4
       with:
@@ -64,30 +64,30 @@ jobs:
     runs-on: ubuntu-latest
     needs: docker
     if: "github.event_name == 'push' && github.ref == 'refs/heads/main'"
-    
+
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Set up Singularity
       uses: eWaterCycle/setup-singularity@v7
       with:
         singularity-version: 3.8.7
-    
+
     - name: Validate Singularity definition file
       run: |
         singularity parser Singularity
-    
+
     - name: Build Singularity image from Docker
       run: |
         # First build the Docker image
         docker build -t bids/freesurfer:test .
-        
+
         # Then build Singularity image from the Docker image
         singularity build --disable-cache freesurfer.sif Singularity
-        
+
         # Verify the image was built
         ls -lah freesurfer.sif
-    
+
     - name: Test Singularity image help
       run: |
         singularity run-help freesurfer.sif

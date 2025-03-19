@@ -9,7 +9,7 @@ From: vnmd/freesurfer_8.0.0
         python3-setuptools \
         git \
         && rm -rf /var/lib/apt/lists/*
-    
+
     # Create app directory
     mkdir -p /app
 
@@ -35,11 +35,11 @@ From: vnmd/freesurfer_8.0.0
 
 %help
     FreeSurfer 8.0.0 BIDS App
-    
+
     This container requires binding your code repository to /app
-    
+
     Usage:
       singularity run --bind /path/to/repo:/app,/path/to/license.txt:/license.txt,/path/to/data:/data,/path/to/output:/output freesurfer.sif [options]
-      
+
     Example:
       singularity run --bind $PWD:/app,$PWD/license.txt:/license.txt,/data:/data,/output:/output freesurfer.sif --bids_dir /data --output_dir /output

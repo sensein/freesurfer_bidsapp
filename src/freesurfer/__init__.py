@@ -7,4 +7,4 @@ on BIDS datasets and organizing the outputs in a BIDS-compliant format.
 
 from .wrapper import FreeSurferWrapper
 
-__all__ = ['FreeSurferWrapper', 'create_parser', 'main']
+__all__ = ["FreeSurferWrapper", "create_parser", "main"]
