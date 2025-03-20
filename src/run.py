@@ -24,7 +24,7 @@ import rdflib
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import RDF, RDFS, XSD
 
-from bids import BIDSLayout
+from bids.layout import BIDSLayout
 from src.bids.provenance import BIDSProvenance, create_bids_provenance
 
 # Local modules
@@ -57,6 +57,7 @@ logger = logging.getLogger("bids-freesurfer")
 )
 @click.option(
     "--freesurfer_license",
+    "--fs-license-file", 
     type=click.Path(exists=True, resolve_path=True),
     help="Path to FreeSurfer license file.",
 )
