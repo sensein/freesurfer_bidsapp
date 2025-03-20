@@ -10,36 +10,38 @@ From: vnmd/freesurfer_8.0.0
         git \
         && rm -rf /var/lib/apt/lists/*
 
-    # Create app directory
-    mkdir -p /app
+    # Create opt directory for application code
+    mkdir -p /opt
+    
+    # Install Python dependencies
+    cd /opt
+    pip3 install --no-cache-dir -r requirements.txt
+    # If you have a setup.py, also install the package
+    pip3 install -e .
+
+%files
+    ./src /opt/src
+    ./requirements.txt /opt/requirements.txt
+    ./setup.py /opt/setup.py
+    ./setup.cfg /opt/setup.cfg
 
 %environment
-    # Set runtime license path (for mounted license)
-    export FS_LICENSE=/license.txt
-    # Add app to Python path
-    export PYTHONPATH=/app:$PYTHONPATH
+    # Set runtime license path to match BABS mount point
+    export FS_LICENSE=/SGLR/FREESURFER_HOME/license.txt
+    # Add opt to Python path
+    export PYTHONPATH=/opt:$PYTHONPATH
 
 %runscript
-    # Check if we need to install the package
-    if [ -f /app/setup.py ]; then
-        echo "Found repository at /app, installing package..."
-        cd /app && pip3 install -e .
-        # Run using the installed entry point
-        bids-freesurfer "$@"
-    else
-        echo "ERROR: Repository not found at /app"
-        echo "Please bind your repository to /app using:"
-        echo "singularity run --bind /path/to/repo:/app,/path/to/license.txt:/license.txt,/path/to/data:/data,/path/to/output:/output freesurfer.sif [options]"
-        exit 1
-    fi
+    # Execute the Python entry point directly, assuming input/output paths are provided as arguments
+    python3 /opt/src/run.py "$@"
 
 %help
     FreeSurfer 8.0.0 BIDS App
 
-    This container requires binding your code repository to /app
+    This container is designed to work with BABS.
 
     Usage:
-      singularity run --bind /path/to/repo:/app,/path/to/license.txt:/license.txt,/path/to/data:/data,/path/to/output:/output freesurfer.sif [options]
+      singularity run -B [workdir] -B [license.txt]:/SGLR/FREESURFER_HOME/license.txt [container] [input_dir] [output_dir] participant --fs-license-file /SGLR/FREESURFER_HOME/license.txt [options]
 
     Example:
-      singularity run --bind $PWD:/app,$PWD/license.txt:/license.txt,/data:/data,/output:/output freesurfer.sif --bids_dir /data --output_dir /output
+      singularity run -B $PWD -B license.txt:/SGLR/FREESURFER_HOME/license.txt freesurfer.sif $PWD/inputs/data/BIDS $PWD/outputs/freesurfer participant --fs-license-file /SGLR/FREESURFER_HOME/license.txt --skip-bids-validation --n_cpus 16 --participant-label sub-001

@@ -11,24 +11,22 @@ RUN apt-get update && apt-get install -y \
 # =======================================
 # Environment Configuration
 # =======================================
-# Set runtime license path (for mounted license)
-ENV FS_LICENSE=/license.txt
+# Make license path match BABS mount point
+ENV FS_LICENSE=/SGLR/FREESURFER_HOME/license.txt
 
 # =======================================
 # BIDS App Setup
 # =======================================
-WORKDIR /app
-
-# Copy application files
-COPY . /app/
+# Copy application files to a location that won't conflict
+COPY . /opt/
 
 # Install Python dependencies
+WORKDIR /opt
 RUN pip3 install --no-cache-dir -r requirements.txt && \
     pip3 install -e .
 
 # =======================================
 # Runtime Configuration
 # =======================================
-# Default command shows help
-ENTRYPOINT ["python3", "/app/src/run.py"]
-CMD ["--help"]
+# Entrypoint that expects input/output paths as arguments
+ENTRYPOINT ["python3", "/opt/src/run.py"]
