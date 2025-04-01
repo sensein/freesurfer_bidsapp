@@ -29,9 +29,8 @@ def test_third_party_imports():
 def test_local_imports():
     """Test that all local module imports work"""
     try:
-        from src.bids.provenance import BIDSProvenance, create_bids_provenance
         from src.freesurfer.wrapper import FreeSurferWrapper
-        from src.nidm.fs2nidm import FreeSurferToNIDM, convert_subject, create_group_nidm
+        from src.nidm.fs2nidm import FreeSurferToNIDM, convert_subject
         from src.utils import get_freesurfer_version, setup_logging
         assert True  # If we get here, imports worked
     except ImportError as e:

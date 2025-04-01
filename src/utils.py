@@ -53,7 +53,6 @@ def get_freesurfer_version():
         logging.warning(f"Failed to get FreeSurfer version: {str(e)}")
         return "unknown"
 
-
 def setup_logging(log_level=logging.INFO, log_file=None):
     """
     Configure logging for the application.

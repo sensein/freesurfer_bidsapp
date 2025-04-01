@@ -45,6 +45,7 @@ NFO = Namespace("http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#")
 # Constants
 FREESURFER_CDE = "https://raw.githubusercontent.com/ReproNim/segstats_jsonld/master/segstats_jsonld/mapping_data/fs_cde.ttl"
 MIN_MATCH_SCORE = 30  # minimum match score for fuzzy matching NIDM terms
+CDE_TIMEOUT = 5  # timeout in seconds for CDE download
 
 # Mapping for measurement types
 MEASURE_OF_KEY = {
@@ -62,87 +63,58 @@ MEASURE_OF_KEY = {
 class FreeSurferToNIDM:
     """Convert FreeSurfer outputs to NIDM format."""
 
-    def __init__(
-        self, freesurfer_dir, subject_label, session_label=None, output_dir=None
-    ):
+    def __init__(self, freesurfer_dir, subject_id, session_label=None, output_dir=None):
+        """Initialize the FreeSurfer to NIDM converter.
+        
+        Args:
+            freesurfer_dir (str): Path to FreeSurfer subjects directory
+            subject_id (str): Subject ID (with or without 'sub-' prefix)
+            session_label (str, optional): BIDS session label (with or without 'ses-' prefix)
+            output_dir (str, optional): Directory to save NIDM output
         """
-        Initialize the converter.
-
-        Parameters
-        ----------
-        freesurfer_dir : str
-            Path to FreeSurfer derivatives directory
-        subject_label : str
-            Subject label (without 'sub-' prefix)
-        session_label : str, optional
-            Session label (without 'ses-' prefix)
-        output_dir : str, optional
-            Output directory for NIDM files (default is freesurfer_dir/../nidm)
-        """
-        # Set up paths
         self.freesurfer_dir = Path(freesurfer_dir)
-        self.subject_label = subject_label
-        self.session_label = session_label
-
-        # Validate directories
         if not self.freesurfer_dir.exists():
-            raise ValueError(
-                f"FreeSurfer directory does not exist: {self.freesurfer_dir}"
-            )
-
-        # Set up subject ID and paths
-        if session_label:
-            self.subject_id = f"{subject_label}_{session_label}"
-            self.fs_subject_dir = (
-                self.freesurfer_dir / f"sub-{subject_label}" / f"ses-{session_label}"
-            )
-        else:
-            self.subject_id = subject_label
-            self.fs_subject_dir = self.freesurfer_dir / f"sub-{subject_label}"
-
-        # Validate subject directory
+            raise ValueError(f"FreeSurfer directory not found: {freesurfer_dir}")
+        
+        # Handle subject ID with or without prefix
+        self.subject_id = subject_id.replace("sub-", "")  # Remove prefix if present
+        
+        # Handle session label with or without prefix
+        self.session_label = session_label.replace("ses-", "") if session_label else None
+        
+        # Construct BIDS-compliant paths
+        self.subject_label = self.subject_id  # Don't add 'sub-' prefix
+        self.fs_subject_dir = self.freesurfer_dir / f"sub-{self.subject_id}"
         if not self.fs_subject_dir.exists():
-            raise ValueError(f"Subject directory does not exist: {self.fs_subject_dir}")
-
+            raise ValueError(f"Subject directory not found: {self.fs_subject_dir}")
+        
+        if self.session_label:
+            self.fs_subject_dir = self.fs_subject_dir / f"ses-{self.session_label}"
+            if not self.fs_subject_dir.exists():
+                raise ValueError(f"Session directory not found: {self.fs_subject_dir}")
+        
+        # Initialize RDF graph
+        self.graph = Graph()
+        self.processed_files = set()
+        
         # Set up output directory
         if output_dir:
             self.output_dir = Path(output_dir)
         else:
+            # Default to a 'nidm' directory next to the FreeSurfer directory
             self.output_dir = self.freesurfer_dir.parent / "nidm"
-
-        # Create output directory
-        if session_label:
-            self.nidm_subject_dir = (
-                self.output_dir / f"sub-{subject_label}" / f"ses-{session_label}"
-            )
-        else:
-            self.nidm_subject_dir = self.output_dir / f"sub-{subject_label}"
-
-        os.makedirs(self.nidm_subject_dir, exist_ok=True)
-
-        # Initialize RDF graph
-        self.graph = Graph()
-        self._bind_namespaces()
-
-        # Create URIs using simpler approach
-        self.subject_uri = NIIRI[f"subject-{subject_label}"]
-        self.fs_process = NIIRI[f"fs-process-{subject_label}"]
-        self.fs_software = URIRef("http://surfer.nmr.mgh.harvard.edu/")
-
-        # Track processing
-        self.processed_files = []
-
-        # Load term mappings
+        
+        logger.info(f"Using output directory: {self.output_dir}")
+        
+        # Load FreeSurfer mappings and CDE graph
         self.fs_mappings = load_fs_mapping()
-
-        # Try to load CDE graph
-        try:
-            self.cde_graph = self._load_cde_graph()
-        except Exception as e:
-            logger.warning(
-                f"Could not load CDE graph: {str(e)}. Will use local mappings only."
-            )
-            self.cde_graph = None
+        self.cde_graph = self._load_cde_graph()
+        
+        # Bind namespaces to the graph
+        self._bind_namespaces()
+        
+        # Add basic provenance information
+        self._add_basic_provenance()
 
     def _bind_namespaces(self):
         """Bind namespaces to the RDF graph."""
@@ -162,7 +134,10 @@ class FreeSurferToNIDM:
         """Load the FreeSurfer CDE graph from the web."""
         g = Graph()
         try:
-            g.parse(location=FREESURFER_CDE, format="turtle")
+            # Add timeout to the request
+            response = ur.urlopen(FREESURFER_CDE, timeout=CDE_TIMEOUT)
+            content = response.read().decode('utf-8')
+            g.parse(data=content, format="turtle")
             return g
         except Exception as e:
             logger.warning(f"Could not load FreeSurfer CDE graph: {str(e)}")
@@ -171,31 +146,35 @@ class FreeSurferToNIDM:
     def _get_cde_mappings(self):
         """Get CDE mappings from the loaded CDE graph."""
         if not self.cde_graph:
-            return {}
+            return pd.DataFrame()  # Return empty DataFrame instead of None
 
-        query = """
-            prefix fs: <https://surfer.nmr.mgh.harvard.edu/>
-            prefix nidm: <http://purl.org/nidash/nidm#>
-            prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-            prefix xsd: <http://www.w3.org/2001/XMLSchema#>
+        try:
+            query = """
+                prefix fs: <https://surfer.nmr.mgh.harvard.edu/>
+                prefix nidm: <http://purl.org/nidash/nidm#>
+                prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                prefix xsd: <http://www.w3.org/2001/XMLSchema#>
 
-            select distinct ?uuid ?measure ?structure ?label
-            where {
-                ?uuid a fs:DataElement ;
-                    nidm:measureOf ?measure ;
-                    rdfs:label ?label ;
-                    fs:structure ?structure .
-            } order by ?uuid
-        """
+                select distinct ?uuid ?measure ?structure ?label
+                where {
+                    ?uuid a fs:DataElement ;
+                        nidm:measureOf ?measure ;
+                        rdfs:label ?label ;
+                        fs:structure ?structure .
+                } order by ?uuid
+            """
 
-        results = []
-        qres = self.cde_graph.query(query)
-        columns = [str(var) for var in qres.vars]
+            results = []
+            qres = self.cde_graph.query(query)
+            columns = [str(var) for var in qres.vars]
 
-        for row in qres:
-            results.append(list(row))
+            for row in qres:
+                results.append(list(row))
 
-        return pd.DataFrame(results, columns=columns)
+            return pd.DataFrame(results, columns=columns)
+        except Exception as e:
+            logger.warning(f"Error querying CDE graph: {str(e)}")
+            return pd.DataFrame()  # Return empty DataFrame on error
 
     def _get_fs_version(self):
         """Get FreeSurfer version from logs or other sources."""
@@ -258,72 +237,51 @@ class FreeSurferToNIDM:
         return None
 
     def _add_basic_provenance(self):
-        """Add basic provenance information to the RDF graph."""
-        # Add subject information
-        self.graph.add((self.subject_uri, RDF.type, PROV.Entity))
-        self.graph.add((self.subject_uri, RDF.type, NIDM.Subject))
-        self.graph.add(
-            (self.subject_uri, RDFS.label, Literal(f"Subject {self.subject_label}"))
-        )
-        self.graph.add((self.subject_uri, BIDS.subject_id, Literal(self.subject_label)))
-        self.graph.add(
-            (self.subject_uri, NDAR.src_subject_id, Literal(self.subject_label))
-        )
-
-        if self.session_label:
-            self.graph.add(
-                (self.subject_uri, BIDS.session_id, Literal(self.session_label))
-            )
-
-        # Add FreeSurfer process information
-        self.graph.add((self.fs_process, RDF.type, PROV.Activity))
-        self.graph.add((self.fs_process, RDF.type, NIDM.FreeSurferAnalysis))
-        self.graph.add((self.fs_process, PROV.used, self.subject_uri))
-
-        # Add FreeSurfer software information
+        """Add basic provenance information to the NIDM graph."""
+        # Add software information
+        self.fs_software = NIIRI[f"software-{uuid4()}"]
+        self.graph.add((self.fs_software, RDF.type, NIDM.Software))
         self.graph.add((self.fs_software, RDF.type, PROV.SoftwareAgent))
-        self.graph.add((self.fs_software, RDFS.label, Literal("FreeSurfer")))
-        self.graph.add((self.fs_process, PROV.wasAssociatedWith, self.fs_software))
-        self.graph.add(
-            (
-                self.fs_software,
-                NIDM.neuroimagingAnalysisSoftware,
-                URIRef("http://surfer.nmr.mgh.harvard.edu/"),
-            )
-        )
-
-        # Try to get version information
+        self.graph.add((self.fs_software, NIDM.label, Literal("FreeSurfer")))
+        self.graph.add((self.fs_software, NIDM.neuroimagingAnalysisSoftware, URIRef("http://surfer.nmr.mgh.harvard.edu/")))
+        
+        # Add version information
         version = self._get_fs_version()
-        self.graph.add((self.fs_software, PROV.version, Literal(version or "unknown")))
-
+        if version:
+            self.graph.add((self.fs_software, DCTERMS.hasVersion, Literal(version)))
+        else:
+            self.graph.add((self.fs_software, DCTERMS.hasVersion, Literal("unknown")))
+        
         # Add timestamp
-        current_time = datetime.datetime.now().isoformat()
-        self.graph.add(
-            (
-                self.fs_process,
-                PROV.startedAtTime,
-                Literal(current_time, datatype=XSD.dateTime),
-            )
-        )
-
-        # Add qualified association between subject and process
-        association_bnode = BNode()
-        self.graph.add((self.fs_process, PROV.qualifiedAssociation, association_bnode))
-        self.graph.add((association_bnode, RDF.type, PROV.Association))
-        self.graph.add((association_bnode, PROV.hadRole, SIO.Subject))
-        self.graph.add((association_bnode, PROV.agent, self.subject_uri))
-
-        # Create project and session
-        project_uri = NIIRI[f"project-{uuid4().hex[:8]}"]
+        self.graph.add((self.fs_software, PROV.generatedAtTime, Literal(datetime.datetime.now().isoformat())))
+        
+        # Add subject information
+        self.subject_uri = NIIRI[f"subject-{self.subject_id}"]
+        self.graph.add((self.subject_uri, RDF.type, NIDM.Subject))
+        self.graph.add((self.subject_uri, NIDM.label, Literal(self.subject_id)))
+        
+        # Add session information if available
+        if self.session_label:
+            session_uri = NIIRI[f"session-{self.session_label}"]
+            self.graph.add((session_uri, RDF.type, NIDM.Session))
+            self.graph.add((session_uri, NIDM.label, Literal(self.session_label)))
+            self.graph.add((self.subject_uri, URIRef("http://bids.neuroimaging.io/terms/session_id"), Literal(self.session_label)))
+            self.graph.add((session_uri, PROV.wasAssociatedWith, self.subject_uri))
+        
+        # Add process information
+        self.fs_process = NIIRI[f"process-{uuid4()}"]
+        self.graph.add((self.fs_process, RDF.type, NIDM.FreeSurferAnalysis))
+        self.graph.add((self.fs_process, PROV.wasAssociatedWith, self.fs_software))
+        self.graph.add((self.fs_process, PROV.used, self.subject_uri))
+        if self.session_label:
+            self.graph.add((self.fs_process, PROV.used, session_uri))
+        
+        # Add project information
+        project_uri = NIIRI[f"project-{uuid4()}"]
         self.graph.add((project_uri, RDF.type, NIDM.Project))
-
-        session_uri = NIIRI[f"session-{self.subject_label}"]
-        self.graph.add((session_uri, RDF.type, PROV.Activity))
-        self.graph.add((session_uri, RDF.type, NIDM.Session))
-        self.graph.add((session_uri, DCTERMS.isPartOf, project_uri))
-
-        # Associate process with session
-        self.graph.add((self.fs_process, DCTERMS.isPartOf, session_uri))
+        self.graph.add((project_uri, NIDM.label, Literal("FreeSurfer Analysis")))
+        self.graph.add((project_uri, PROV.wasAssociatedWith, self.fs_software))
+        self.graph.add((project_uri, PROV.wasGeneratedBy, self.fs_process))
 
     def _process_stats_files(self):
         """Process FreeSurfer stats files and add to RDF graph."""
@@ -336,7 +294,7 @@ class FreeSurferToNIDM:
         aseg_file = stats_dir / "aseg.stats"
         if aseg_file.exists():
             self._process_stats_file(aseg_file, "aseg")
-            self.processed_files.append("aseg.stats")
+            self.processed_files.add("aseg.stats")
 
         # Process parcellation files
         for filename in stats_dir.glob("*.aparc*.stats"):
@@ -353,14 +311,85 @@ class FreeSurferToNIDM:
             self._process_stats_file(
                 filename, "aparc", hemisphere=hemisphere, atlas=atlas
             )
-            self.processed_files.append(name)
+            self.processed_files.add(name)
 
         # Process other stats files
-        for special_file in ["wmparc.stats", "brainvol.stats"]:
+        for special_file in ["wmparc.stats", "brainvol.stats", "entowm.stats"]:
             file_path = stats_dir / special_file
             if file_path.exists():
                 self._process_stats_file(file_path, special_file.split(".")[0])
-                self.processed_files.append(special_file)
+                self.processed_files.add(special_file)
+
+        # Process surface measurements
+        surf_dir = self.fs_subject_dir / "surf"
+        if surf_dir.exists():
+            # Process thickness
+            for hemi in ["lh", "rh"]:
+                thickness_file = surf_dir / f"{hemi}.thickness"
+                if thickness_file.exists():
+                    self._process_surface_file(thickness_file, "thickness", hemi)
+                    self.processed_files.add(f"{hemi}.thickness")
+
+            # Process area
+            for hemi in ["lh", "rh"]:
+                area_file = surf_dir / f"{hemi}.area"
+                if area_file.exists():
+                    self._process_surface_file(area_file, "area", hemi)
+                    self.processed_files.add(f"{hemi}.area")
+
+            # Process curvature
+            for hemi in ["lh", "rh"]:
+                curv_file = surf_dir / f"{hemi}.curv"
+                if curv_file.exists():
+                    self._process_surface_file(curv_file, "curvature", hemi)
+                    self.processed_files.add(f"{hemi}.curv")
+
+    def _process_surface_file(self, surface_file, measure_type, hemisphere):
+        """
+        Process a surface measurement file.
+
+        Parameters
+        ----------
+        surface_file : Path
+            Path to surface measurement file
+        measure_type : str
+            Type of measurement ('thickness', 'area', 'curvature')
+        hemisphere : str
+            Hemisphere ('lh' or 'rh')
+        """
+        logger.info(f"Processing {surface_file.name}")
+
+        try:
+            # Create a container for the surface measurements
+            container_id = f"{hemisphere}-{measure_type}-{self.subject_id}"
+            container_uri = NIIRI[container_id]
+
+            # Add container metadata
+            self.graph.add((container_uri, RDF.type, FS.SurfaceMeasurement))
+            self.graph.add(
+                (
+                    container_uri,
+                    RDFS.label,
+                    Literal(f"{hemisphere.upper()} {measure_type.capitalize()} Measurements"),
+                )
+            )
+            self.graph.add((container_uri, FS.hemisphere, Literal(hemisphere)))
+            self.graph.add((container_uri, FS.measurementType, Literal(measure_type)))
+            self.graph.add(
+                (self.subject_uri, FS.hasSurfaceMeasurement, container_uri)
+            )
+
+            # Add file info
+            self.graph.add((container_uri, PROV.wasGeneratedBy, self.fs_process))
+            self.graph.add((container_uri, NIDM.hasFile, Literal(str(surface_file))))
+
+            # Add standard term mapping if available
+            std_term = map_fs_term(measure_type, self.fs_mappings, "measure")
+            if std_term:
+                self.graph.add((container_uri, RDFS.seeAlso, URIRef(std_term)))
+
+        except Exception as e:
+            logger.warning(f"Error processing surface file {surface_file}: {str(e)}")
 
     def _process_stats_file(self, stats_file, stats_type, hemisphere=None, atlas=None):
         """
@@ -386,9 +415,9 @@ class FreeSurferToNIDM:
             return
 
         # Create a container for the stats
-        container_id = f"{stats_type}-{self.subject_label}"
+        container_id = f"{stats_type}-{self.subject_id}"
         if hemisphere:
-            container_id = f"{hemisphere}-{atlas}-{self.subject_label}"
+            container_id = f"{hemisphere}-{atlas}-{self.subject_id}"
 
         container_uri = NIIRI[container_id]
 
@@ -436,14 +465,14 @@ class FreeSurferToNIDM:
 
         # Add file info
         self.graph.add((container_uri, PROV.wasGeneratedBy, self.fs_process))
-        self.graph.add((container_uri, PROV.atLocation, Literal(str(stats_file))))
+        self.graph.add((container_uri, NIDM.hasFile, Literal(str(stats_file))))
 
         # Add global measures
         for name, value in data["global_measures"].items():
             measure_uri = NIIRI[f"{container_id}-measure-{safe_id(name)}"]
             self.graph.add((container_uri, FS[safe_id(name)], measure_uri))
             self.graph.add((measure_uri, RDF.type, FS.Measurement))
-            self.graph.add((measure_uri, RDFS.label, Literal(name)))
+            self.graph.add((measure_uri, NIDM.label, Literal(name)))
             self.graph.add((measure_uri, FS.value, Literal(value, datatype=XSD.float)))
 
             # Add standard term mapping if available
@@ -480,7 +509,7 @@ class FreeSurferToNIDM:
                 self.graph.add((struct_uri, RDF.type, FS.StatisticsItem))
 
             # Add label
-            self.graph.add((struct_uri, RDFS.label, Literal(name)))
+            self.graph.add((struct_uri, NIDM.label, Literal(name)))
 
             # Add properties
             for key, value in struct.items():
@@ -551,7 +580,7 @@ class FreeSurferToNIDM:
             where {
                 ?uuid a fs:DataElement ;
                     rdfs:label ?label .
-            }
+                }
         """
 
         qres = self.cde_graph.query(query)
@@ -576,6 +605,85 @@ class FreeSurferToNIDM:
             )
         ]
 
+    def _process_mri_files(self):
+        """Process FreeSurfer MRI volume files and add to RDF graph."""
+        mri_dir = self.fs_subject_dir / "mri"
+        if not mri_dir.exists():
+            logger.warning(f"MRI directory not found: {mri_dir}")
+            return
+
+        # Process segmentation volumes
+        for filename in [
+            "aparc+aseg.mgz",
+            "aparc.a2009s+aseg.mgz",
+            "aparc.DKTatlas+aseg.mgz",
+            "wmparc.mgz"
+        ]:
+            file_path = mri_dir / filename
+            if file_path.exists():
+                self._process_mri_file(file_path)
+                self.processed_files.add(filename)
+
+    def _process_mri_file(self, mri_file):
+        """
+        Process an MRI volume file.
+
+        Parameters
+        ----------
+        mri_file : Path
+            Path to MRI volume file
+        """
+        logger.info(f"Processing {mri_file.name}")
+
+        try:
+            # Create a container for the MRI volume
+            container_id = f"mri-{mri_file.stem}-{self.subject_id}"
+            container_uri = NIIRI[container_id]
+
+            # Determine the type of volume
+            if "aparc+aseg" in mri_file.name:
+                vol_type = "CombinedSegmentation"
+                atlas = "aparc"
+            elif "aparc.a2009s+aseg" in mri_file.name:
+                vol_type = "CombinedSegmentation"
+                atlas = "a2009s"
+            elif "aparc.DKTatlas+aseg" in mri_file.name:
+                vol_type = "CombinedSegmentation"
+                atlas = "DKTatlas"
+            elif "wmparc" in mri_file.name:
+                vol_type = "WhiteMatterSegmentation"
+                atlas = None
+            else:
+                vol_type = "MRI"
+                atlas = None
+
+            # Add container metadata
+            self.graph.add((container_uri, RDF.type, FS.MRIVolume))
+            self.graph.add(
+                (
+                    container_uri,
+                    RDFS.label,
+                    Literal(f"{vol_type} Volume"),
+                )
+            )
+            if atlas:
+                self.graph.add((container_uri, FS.atlas, Literal(atlas)))
+            self.graph.add(
+                (self.subject_uri, FS.hasMRIVolume, container_uri)
+            )
+
+            # Add file info
+            self.graph.add((container_uri, PROV.wasGeneratedBy, self.fs_process))
+            self.graph.add((container_uri, NIDM.hasFile, Literal(str(mri_file))))
+
+            # Add standard term mapping if available
+            std_term = map_fs_term(vol_type, self.fs_mappings, "volume")
+            if std_term:
+                self.graph.add((container_uri, RDFS.seeAlso, URIRef(std_term)))
+
+        except Exception as e:
+            logger.warning(f"Error processing MRI file {mri_file}: {str(e)}")
+
     def convert(self):
         """
         Convert FreeSurfer outputs to NIDM format.
@@ -587,6 +695,7 @@ class FreeSurferToNIDM:
         """
         try:
             logger.info(f"Converting FreeSurfer outputs for {self.subject_id} to NIDM")
+            logger.info(f"Output directory: {self.output_dir}")
 
             # Add basic provenance information
             self._add_basic_provenance()
@@ -594,17 +703,56 @@ class FreeSurferToNIDM:
             # Process FreeSurfer stats files
             self._process_stats_files()
 
+            # Process MRI volume files
+            self._process_mri_files()
+
+            # Create JSON-LD context
+            context = {
+                "@context": {
+                    "nidm": "http://purl.org/nidash/nidm#",
+                    "niiri": "http://iri.nidash.org/",
+                    "prov": "http://www.w3.org/ns/prov#",
+                    "fs": "http://surfer.nmr.mgh.harvard.edu/fs/terms/",
+                    "bids": "http://bids.neuroimaging.io/terms/",
+                    "dcterms": "http://purl.org/dc/terms/",
+                    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                    "xsd": "http://www.w3.org/2001/XMLSchema#",
+                    "ndar": "https://ndar.nih.gov/api/datadictionary/v2/dataelement/",
+                    "sio": "http://semanticscience.org/resource/",
+                    "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#"
+                }
+            }
+
+            # Ensure output directory exists
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created output directory: {self.output_dir}")
+
             # Serialize to JSON-LD and Turtle
-            output_file = self.nidm_subject_dir / "prov.jsonld"
-            self.graph.serialize(
-                destination=str(output_file), format="json-ld", indent=4
-            )
+            if self.session_label:
+                output_file = self.output_dir / f"prov-sub-{self.subject_id}_ses-{self.session_label}.jsonld"
+                turtle_file = self.output_dir / f"prov-sub-{self.subject_id}_ses-{self.session_label}.ttl"
+            else:
+                output_file = self.output_dir / f"prov-sub-{self.subject_id}.jsonld"
+                turtle_file = self.output_dir / f"prov-sub-{self.subject_id}.ttl"
+            
+            jsonld_data = self.graph.serialize(format="json-ld", indent=4)
+            
+            # Parse the graph data and merge with context
+            graph_data = json.loads(jsonld_data)
+            if "@graph" in graph_data:
+                context["@graph"] = graph_data["@graph"]
+            else:
+                context["@graph"] = graph_data
+            
+            # Write the complete JSON-LD data
+            with open(output_file, 'w') as f:
+                json.dump(context, f, indent=4)
+            logger.info(f"Wrote JSON-LD file to: {output_file}")
 
-            turtle_file = self.nidm_subject_dir / "prov.ttl"
             self.graph.serialize(destination=str(turtle_file), format="turtle")
+            logger.info(f"Wrote Turtle file to: {turtle_file}")
 
-            logger.info(f"NIDM output created at {output_file}")
-            logger.info(f"Processed {len(self.processed_files)} FreeSurfer stats files")
+            logger.info(f"Processed {len(self.processed_files)} FreeSurfer files")
 
             return str(output_file)
 
@@ -613,177 +761,39 @@ class FreeSurferToNIDM:
             raise
 
 
-def convert_subject(freesurfer_dir, subject_label, session_label=None, output_dir=None):
+def convert_subject(freesurfer_dir, subject_id, session_label=None, output_dir=None):
     """
-    Convert FreeSurfer outputs for a subject to NIDM format.
+    Convert a single subject's FreeSurfer outputs to NIDM format.
 
     Parameters
     ----------
     freesurfer_dir : str
         Path to FreeSurfer derivatives directory
-    subject_label : str
-        Subject label (without 'sub-' prefix)
+    subject_id : str
+        Subject ID (with or without 'sub-' prefix)
     session_label : str, optional
         Session label (without 'ses-' prefix)
     output_dir : str, optional
-        Output directory for NIDM files
-
-    Returns
-    -------
-    str
-        Path to the output NIDM file
+        Output directory for NIDM files (default is freesurfer_dir/../nidm)
     """
-    try:
-        # Initialize and run converter
-        converter = FreeSurferToNIDM(
-            freesurfer_dir, subject_label, session_label, output_dir
-        )
-        output_file = converter.convert()
-
-        return output_file
-    except Exception as e:
-        logger.error(f"Error converting subject {subject_label}: {str(e)}")
-        raise
-
-
-def create_group_nidm(subjects, nidm_dir):
-    """
-    Create group-level NIDM output by aggregating subject-level data.
-
-    Parameters
-    ----------
-    subjects : list
-        List of subject labels (with 'sub-' prefix)
-    nidm_dir : str
-        Output directory for NIDM files
-
-    Returns
-    -------
-    str
-        Path to the output group NIDM file
-    """
-    try:
-        # Create output directory
-        nidm_dir = Path(nidm_dir)
-        os.makedirs(nidm_dir, exist_ok=True)
-
-        # Initialize graph
-        g = Graph()
-        g.bind("nidm", NIDM)
-        g.bind("niiri", NIIRI)
-        g.bind("prov", PROV)
-        g.bind("fs", FS)
-        g.bind("bids", BIDS)
-
-        # Create group entity
-        group_uri = NIIRI[f"group-{uuid4().hex[:8]}"]
-        g.add((group_uri, RDF.type, NIDM.Group))
-        g.add((group_uri, RDFS.label, Literal("Study Group")))
-
-        # Add creation info
-        g.add(
-            (
-                group_uri,
-                PROV.generatedAtTime,
-                Literal(datetime.datetime.now().isoformat(), datatype=XSD.dateTime),
-            )
-        )
-
-        # Track processing results
-        successful = []
-        failed = []
-
-        # Add each subject to the group
-        for subject in subjects:
-            subject_label = subject.replace("sub-", "")
-            subject_uri = NIIRI[f"subject-group-{subject_label}"]
-
-            # Link subject to group
-            g.add((group_uri, PROV.hadMember, subject_uri))
-            g.add((subject_uri, BIDS.subject_id, Literal(subject_label)))
-
-            # Try to reference subject data
-            subject_file = nidm_dir / subject / "prov.jsonld"
-            if os.path.exists(subject_file):
-                try:
-                    # Load subject graph and link to group
-                    g.add(
-                        (
-                            subject_uri,
-                            RDFS.seeAlso,
-                            URIRef(f"file://{subject_file.absolute()}"),
-                        )
-                    )
-                    successful.append(subject_label)
-                except:
-                    failed.append(subject_label)
-            else:
-                logger.warning(f"No data found for subject {subject}")
-                failed.append(subject_label)
-
-        # Add summary metadata
-        g.add(
-            (
-                group_uri,
-                NIDM.numberOfSubjects,
-                Literal(len(subjects), datatype=XSD.integer),
-            )
-        )
-        g.add(
-            (
-                group_uri,
-                NIDM.subjectsWithData,
-                Literal(len(successful), datatype=XSD.integer),
-            )
-        )
-
-        # Write output files
-        output_file = nidm_dir / "group_prov.jsonld"
-        g.serialize(destination=str(output_file), format="json-ld", indent=4)
-
-        turtle_file = nidm_dir / "group_prov.ttl"
-        g.serialize(destination=str(turtle_file), format="turtle")
-
-        # Create simple summary file
-        summary = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "total_subjects": len(subjects),
-            "successful": len(successful),
-            "failed": len(failed),
-            "successful_list": successful,
-            "failed_list": failed,
-        }
-
-        with open(nidm_dir / "group_summary.json", "w") as f:
-            json.dump(summary, f, indent=4)
-
-        logger.info(
-            f"Group NIDM created with {len(successful)} of {len(subjects)} subjects"
-        )
-        return str(output_file)
-
-    except Exception as e:
-        logger.error(f"Error creating group NIDM: {str(e)}")
-        raise
+    converter = FreeSurferToNIDM(
+        freesurfer_dir, subject_id, session_label, output_dir
+    )
+    return converter.convert()
 
 
 def convert_from_url(url, subject_id, output_dir):
     """
-    Convert FreeSurfer stats from a URL.
+    Convert FreeSurfer outputs from a URL to NIDM format.
 
     Parameters
     ----------
     url : str
-        URL to FreeSurfer stats file
+        URL to FreeSurfer outputs
     subject_id : str
-        Subject ID to use for the NIDM file
+        Subject ID
     output_dir : str
         Output directory for NIDM files
-
-    Returns
-    -------
-    str
-        Path to the output NIDM file
     """
     try:
         # Check if it's a supported stats file
@@ -973,7 +983,7 @@ def convert_from_csv(
                 measure_uri = NIIRI[f"fs-measure-{subject_id}-{safe_id(column)}"]
                 graph.add((container_uri, FS[safe_id(column)], measure_uri))
                 graph.add((measure_uri, RDF.type, FS.Measurement))
-                graph.add((measure_uri, RDFS.label, Literal(column)))
+                graph.add((measure_uri, NIDM.label, Literal(column)))
 
                 # Add value with appropriate datatype
                 if isinstance(value, (int, float)):

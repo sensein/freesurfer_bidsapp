@@ -16,12 +16,12 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+import time
 
 # Standardize on click throughout the application
 import click
 
 from bids import BIDSLayout
-from src.bids.provenance import BIDSProvenance
 from src.utils import get_freesurfer_version
 
 # Configure logging
@@ -31,7 +31,8 @@ logger = logging.getLogger("bids-freesurfer.wrapper")
 class FreeSurferWrapper:
     """Wrapper for FreeSurfer's recon-all command."""
 
-    def __init__(self, bids_dir, output_dir, freesurfer_license=None, fs_options=None):
+    def __init__(self, bids_dir, output_dir, freesurfer_license=None, fs_options=None, 
+                 parallel=False, num_threads=None, memory_limit=None):
         """
         Initialize FreeSurfer wrapper.
 
@@ -45,26 +46,29 @@ class FreeSurferWrapper:
             Path to FreeSurfer license file
         fs_options : str, optional
             Additional options to pass to recon-all
+        parallel : bool, optional
+            Whether to enable parallel processing
+        num_threads : int, optional
+            Number of threads to use for parallel processing
+        memory_limit : int, optional
+            Memory limit in GB
         """
         self.bids_dir = Path(bids_dir)
         self.output_dir = Path(output_dir)
         self.freesurfer_dir = self.output_dir / "freesurfer"
         self.freesurfer_license = freesurfer_license
         self.fs_options = fs_options or ""
+        self.parallel = parallel
+        self.num_threads = num_threads
+        self.memory_limit = memory_limit
 
         # Track processing results
         self.results = {"success": [], "failure": [], "skipped": []}
+        self.temp_files = []
 
         # Ensure output directories exist
-        os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(self.freesurfer_dir, exist_ok=True)
-
-        # Initialize BIDS provenance
-        try:
-            self.bids_provenance = BIDSProvenance(bids_dir, output_dir)
-        except Exception as e:
-            logger.error(f"Failed to initialize BIDS provenance: {str(e)}")
-            raise
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.freesurfer_dir.mkdir(parents=True, exist_ok=True)
 
         # Setup FreeSurfer environment
         try:
@@ -127,6 +131,187 @@ class FreeSurferWrapper:
                     "FreeSurfer license not found. Please specify with --freesurfer_license"
                 )
 
+    def _create_recon_all_command(self, subject_id, t1w_images, t2w_images=None):
+        """
+        Create FreeSurfer recon-all command.
+
+        Parameters
+        ----------
+        subject_id : str
+            Subject ID for FreeSurfer
+        t1w_images : list
+            List of T1w image paths
+        t2w_images : list, optional
+            List of T2w image paths
+
+        Returns
+        -------
+        list
+            Command list for subprocess
+        """
+        cmd = ["recon-all", "-subjid", subject_id, "-all"]
+
+        # Add T1w images
+        for t1w in t1w_images:
+            cmd.extend(["-i", t1w])
+
+        # Add T2w image if available
+        if t2w_images and len(t2w_images) > 0:
+            cmd.extend(["-T2", t2w_images[0]])
+            cmd.extend(["-T2pial"])
+
+        # Add parallel processing options
+        if self.parallel:
+            cmd.extend(["-parallel"])
+            if self.num_threads:
+                cmd.extend(["-openmp", str(self.num_threads)])
+
+        # Add memory limit if specified
+        if self.memory_limit:
+            cmd.extend(["-max-threads", str(self.memory_limit)])
+
+        # Add additional FreeSurfer options
+        if self.fs_options:
+            if isinstance(self.fs_options, str):
+                fs_options_list = self.fs_options.split()
+                cmd.extend(fs_options_list)
+            elif isinstance(self.fs_options, list):
+                cmd.extend(self.fs_options)
+
+        return cmd
+
+    def _monitor_progress(self, subject_id):
+        """
+        Monitor recon-all progress.
+
+        Parameters
+        ----------
+        subject_id : str
+            Subject ID being processed
+        """
+        log_file = self.freesurfer_dir / subject_id / "scripts" / "recon-all.log"
+        if not log_file.exists():
+            return
+
+        try:
+            with open(log_file) as f:
+                # Seek to end of file
+                f.seek(0, 2)
+                while True:
+                    line = f.readline()
+                    if line:
+                        if "ERROR" in line:
+                            logger.error(f"FreeSurfer error: {line.strip()}")
+                        elif "WARNING" in line:
+                            logger.warning(f"FreeSurfer warning: {line.strip()}")
+                        else:
+                            logger.info(f"FreeSurfer progress: {line.strip()}")
+                    time.sleep(1)
+        except Exception as e:
+            logger.warning(f"Error monitoring progress: {str(e)}")
+
+    def cleanup(self):
+        """Clean up temporary files and directories."""
+        for temp_file in self.temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as e:
+                logger.warning(f"Error removing temporary file {temp_file}: {str(e)}")
+
+    def _organize_bids_output(self, subject_id, subject_label, session_label=None):
+        """
+        Organize FreeSurfer outputs in BIDS-compliant format.
+
+        Parameters
+        ----------
+        subject_id : str
+            FreeSurfer subject ID
+        subject_label : str
+            BIDS subject label
+        session_label : str, optional
+            BIDS session label
+        """
+        # Define BIDS-compliant paths
+        if session_label:
+            bids_subject_dir = self.output_dir / f"sub-{subject_label}" / f"ses-{session_label}"
+        else:
+            bids_subject_dir = self.output_dir / f"sub-{subject_label}"
+
+        # Create BIDS-compliant directories
+        anat_dir = bids_subject_dir / "anat"
+        anat_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy FreeSurfer outputs to BIDS structure
+        fs_subject_dir = self.freesurfer_dir / subject_id
+        if not fs_subject_dir.exists():
+            logger.error(f"FreeSurfer subject directory not found: {fs_subject_dir}")
+            return
+
+        # Copy T1w brain
+        if (fs_subject_dir / "mri" / "brain.mgz").exists():
+            shutil.copy2(
+                fs_subject_dir / "mri" / "brain.mgz",
+                anat_dir / f"sub-{subject_label}{'_ses-' + session_label if session_label else ''}_desc-brain_T1w.nii.gz"
+            )
+
+        # Copy aparc+aseg
+        if (fs_subject_dir / "mri" / "aparc.DKTatlas+aseg.mgz").exists():
+            shutil.copy2(
+                fs_subject_dir / "mri" / "aparc.DKTatlas+aseg.mgz",
+                anat_dir / f"sub-{subject_label}{'_ses-' + session_label if session_label else ''}_desc-aparcaseg_dseg.nii.gz"
+            )
+
+        # Copy wmparc
+        if (fs_subject_dir / "mri" / "wmparc.mgz").exists():
+            shutil.copy2(
+                fs_subject_dir / "mri" / "wmparc.mgz",
+                anat_dir / f"sub-{subject_label}{'_ses-' + session_label if session_label else ''}_desc-wmparc_dseg.nii.gz"
+            )
+
+        # Copy stats files
+        stats_dir = bids_subject_dir / "stats"
+        stats_dir.mkdir(parents=True, exist_ok=True)
+        
+        if (fs_subject_dir / "stats").exists():
+            for stat_file in (fs_subject_dir / "stats").glob("*.stats"):
+                shutil.copy2(
+                    stat_file,
+                    stats_dir / f"sub-{subject_label}{'_ses-' + session_label if session_label else ''}_{stat_file.name}"
+                )
+
+        # Create dataset_description.json if it doesn't exist
+        dataset_desc = self.output_dir / "dataset_description.json"
+        if not dataset_desc.exists():
+            with open(dataset_desc, "w") as f:
+                json.dump({
+                    "Name": "FreeSurfer Derivatives",
+                    "BIDSVersion": "1.4.0",
+                    "DatasetType": "derivative",
+                    "GeneratedBy": [{
+                        "Name": "FreeSurfer",
+                        "Version": get_freesurfer_version(),
+                        "Description": "FreeSurfer cortical reconstruction and parcellation"
+                    }]
+                }, f, indent=2)
+
+        # Create README
+        readme = self.output_dir / "README"
+        if not readme.exists():
+            with open(readme, "w") as f:
+                f.write("""FreeSurfer Derivatives
+====================
+
+This directory contains FreeSurfer derivatives organized according to the BIDS specification.
+The following files are included:
+- Brain-extracted T1w images
+- Cortical parcellation (aparc+aseg)
+- White matter parcellation (wmparc)
+- Statistical measurements in the stats directory
+
+For more information about FreeSurfer, visit: http://surfer.nmr.mgh.harvard.edu/
+""")
+
     def process_subject(self, subject_label, session_label=None, layout=None):
         """
         Process a single subject with FreeSurfer.
@@ -179,15 +364,8 @@ class FreeSurferWrapper:
             # Set up subject ID and output directory
             if session_label:
                 subject_id = f"{subject_label}_{session_label}"
-                bids_output_dir = (
-                    self.output_dir / f"sub-{subject_label}" / f"ses-{session_label}"
-                )
             else:
                 subject_id = subject_label
-                bids_output_dir = self.output_dir / f"sub-{subject_label}"
-
-            # Create BIDS-compliant output directories
-            os.makedirs(bids_output_dir, exist_ok=True)
 
             # Check if subject already processed
             subject_dir = self.freesurfer_dir / subject_id
@@ -201,6 +379,15 @@ class FreeSurferWrapper:
 
             # Generate recon-all command
             cmd = self._create_recon_all_command(subject_id, t1w_images, t2w_images)
+
+            # Start progress monitoring in a separate thread
+            import threading
+            monitor_thread = threading.Thread(
+                target=self._monitor_progress,
+                args=(subject_id,),
+                daemon=True
+            )
+            monitor_thread.start()
 
             # Run recon-all
             logger.info(f"Running command: {' '.join(cmd)}")
@@ -217,10 +404,8 @@ class FreeSurferWrapper:
             if process.stderr:
                 logger.debug(f"Command stderr: {process.stderr}")
 
-            # Create provenance information
-            self.bids_provenance.create_subject_provenance(
-                subject_label, session_label, t1w_images, t2w_images, " ".join(cmd)
-            )
+            # Organize outputs in BIDS format
+            self._organize_bids_output(subject_id, subject_label, session_label)
 
             # Record success
             self.results["success"].append(subject_key)
@@ -234,7 +419,7 @@ class FreeSurferWrapper:
 
             # Create error log file
             error_dir = self.output_dir / "logs"
-            os.makedirs(error_dir, exist_ok=True)
+            error_dir.mkdir(parents=True, exist_ok=True)
             error_file = error_dir / f"{subject_key}_error.log"
 
             with open(error_file, "w") as f:
@@ -252,6 +437,10 @@ class FreeSurferWrapper:
             logger.error(f"Unexpected error processing {subject_key}: {str(e)}")
             self.results["failure"].append(subject_key)
             return False
+
+        finally:
+            # Clean up temporary files
+            self.cleanup()
 
     def _find_t1w_images(self, layout, subject_label, session_label=None):
         """
@@ -321,49 +510,6 @@ class FreeSurferWrapper:
         for f in files:
             logger.debug(f"T2w image: {f}")
         return files
-
-    def _create_recon_all_command(self, subject_id, t1w_images, t2w_images=None):
-        """
-        Create FreeSurfer recon-all command.
-
-        Parameters
-        ----------
-        subject_id : str
-            Subject ID for FreeSurfer
-        t1w_images : list
-            List of T1w image paths
-        t2w_images : list, optional
-            List of T2w image paths
-
-        Returns
-        -------
-        list
-            Command list for subprocess
-        """
-        cmd = ["recon-all", "-subjid", subject_id, "-all"]
-
-        # Add T1w images
-        for t1w in t1w_images:
-            cmd.extend(["-i", t1w])
-
-        # Add T2w image if available
-        if t2w_images and len(t2w_images) > 0:
-            cmd.extend(["-T2", t2w_images[0]])
-
-            # Add T2 pial option if T2 image is provided
-            cmd.extend(["-T2pial"])
-
-        # Add additional FreeSurfer options
-        if self.fs_options:
-            # If fs_options was provided as a string, split it
-            if isinstance(self.fs_options, str):
-                fs_options_list = self.fs_options.split()
-                cmd.extend(fs_options_list)
-            # If it was already a list, extend with it
-            elif isinstance(self.fs_options, list):
-                cmd.extend(self.fs_options)
-
-        return cmd
 
     def get_processing_summary(self):
         """

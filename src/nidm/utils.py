@@ -15,6 +15,7 @@ import urllib.request as ur
 from collections import namedtuple
 from io import StringIO
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
 
 import pandas as pd
 
@@ -23,7 +24,7 @@ try:
 except ImportError:
     fuzz = None
 
-from rdflib import RDF, RDFS, XSD, BNode, Graph, Literal, Namespace, URIRef
+from rdflib import Graph, Namespace, RDF, RDFS, XSD, Literal, URIRef
 
 # Configure logging
 logger = logging.getLogger("bids-freesurfer.nidm.utils")
@@ -31,7 +32,7 @@ logger = logging.getLogger("bids-freesurfer.nidm.utils")
 # Define common namespaces
 NIDM = Namespace("http://purl.org/nidash/nidm#")
 NIIRI = Namespace("http://iri.nidash.org/")
-FS = Namespace("http://surfer.nmr.mgh.harvard.edu/fs/terms/")
+FS = Namespace("http://purl.org/nidash/freesurfer#")
 NDAR = Namespace("https://ndar.nih.gov/api/datadictionary/v2/dataelement/")
 SIO = Namespace("http://semanticscience.org/resource/")
 NFO = Namespace("http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#")
@@ -40,7 +41,7 @@ NFO = Namespace("http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#")
 FSEntry = namedtuple("FSEntry", ["structure", "hemi", "measure", "unit"])
 
 # Minimum match score for fuzzy matching
-MIN_MATCH_SCORE = 30
+MIN_MATCH_SCORE = 85
 
 # Paths to FreeSurfer mapping files
 MODULE_DIR = Path(os.path.dirname(__file__))
@@ -51,7 +52,7 @@ FS_CDE_PATH = os.path.join(MAPPINGS_DIR, "fs_cde.json")
 FS_CDE_TTL_PATH = os.path.join(MAPPINGS_DIR, "fs_cde.ttl")
 
 
-def safe_id(text):
+def safe_id(text: str) -> str:
     """
     Create a safe identifier from text by removing special characters.
 
@@ -68,17 +69,16 @@ def safe_id(text):
     if not text:
         return "unnamed"
 
-    # Replace non-alphanumeric characters with underscores
-    safe = re.sub(r"[^a-zA-Z0-9_]", "_", str(text)).lower()
+    # Remove special characters and replace spaces with underscores
+    safe = re.sub(r'[^a-zA-Z0-9]', '_', text)
+    # Remove multiple consecutive underscores
+    safe = re.sub(r'_+', '_', safe)
+    # Remove leading/trailing underscores
+    safe = safe.strip('_')
+    return safe.lower()
 
-    # Ensure it doesn't start with a number
-    if safe and safe[0].isdigit():
-        safe = "n" + safe
 
-    return safe
-
-
-def parse_fs_stats_file(stats_file):
+def parse_fs_stats_file(stats_file: str) -> Dict[str, Any]:
     """
     Parse a FreeSurfer stats file and extract measurements.
 
@@ -92,98 +92,57 @@ def parse_fs_stats_file(stats_file):
     dict
         Dictionary with global measures and per-structure data
     """
-    if not os.path.exists(stats_file):
-        logger.error(f"Stats file not found: {stats_file}")
-        return None
-
-    result = {"global_measures": {}, "structures": []}
-
-    try:
-        with open(stats_file, "r") as f:
-            lines = f.readlines()
-
-        # Extract global measures (# Measure lines)
-        for line in lines:
-            if line.startswith("# Measure"):
-                parts = line.strip().split(",")
+    data = {}
+    current_section = None
+    
+    with open(stats_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check for section headers
+            if line.startswith('# Measure'):
+                current_section = 'measures'
+                data[current_section] = []
+                continue
+            elif line.startswith('# ColHeaders'):
+                current_section = 'structures'
+                data[current_section] = []
+                continue
+            elif line.startswith('# TableCol'):
+                current_section = 'table'
+                data[current_section] = []
+                continue
+                
+            # Skip comments and empty lines
+            if line.startswith('#') or not line:
+                continue
+                
+            # Parse data based on section
+            if current_section == 'measures':
+                # Parse measure lines (e.g., "BrainSeg, Brain Segmentation Volume, 1234567, mm^3")
+                parts = line.split(',')
                 if len(parts) >= 4:
-                    name = parts[1].strip()
-                    try:
-                        value = float(parts[3].strip())
-                        result["global_measures"][name] = value
-                    except ValueError:
-                        logger.debug(
-                            f"Could not convert measure value to float: {parts[3]}"
-                        )
-
-        # Find the column headers
-        header_idx = None
-        for i, line in enumerate(lines):
-            if line.startswith("# ColHeaders"):
-                header_idx = i
-                break
-
-        # Extract column data if headers are found
-        if header_idx is not None:
-            headers = lines[header_idx].replace("# ColHeaders", "").strip().split()
-
-            # Process data rows
-            for line in lines[header_idx + 1 :]:
-                if line.startswith("#") or not line.strip():
-                    continue
-
-                parts = line.strip().split()
-                if len(parts) < len(headers):
-                    continue
-
-                # Create a dictionary for this structure
-                struct_data = {headers[i]: parts[i] for i in range(len(headers))}
-
-                # Convert numeric values
-                for key, value in list(struct_data.items()):
-                    try:
-                        struct_data[key] = float(value)
-                    except ValueError:
-                        # Keep as string if not a number
-                        pass
-
-                result["structures"].append(struct_data)
-        else:
-            # For files without column headers (like aseg.stats)
-            # Extract volume data directly
-            data_lines = [
-                line
-                for line in lines
-                if not line.startswith("#") and len(line.strip()) > 0
-            ]
-
-            for line in data_lines:
-                parts = line.strip().split()
-                if len(parts) >= 5:
-                    # Assumes standard aseg.stats format
-                    struct_data = {
-                        "Index": int(parts[0]),
-                        "SegId": int(parts[1]),
-                        "NVoxels": int(parts[2]),
-                        "Volume_mm3": float(parts[3]),
-                        "StructName": parts[4],
+                    measure = {
+                        'name': parts[0].strip(),
+                        'description': parts[1].strip(),
+                        'value': float(parts[2].strip()),
+                        'unit': parts[3].strip()
                     }
-
-                    # Add normalized volume if ICV is available
-                    if "EstimatedTotalIntraCranialVol" in result["global_measures"]:
-                        icv = result["global_measures"]["EstimatedTotalIntraCranialVol"]
-                        if icv > 0:
-                            struct_data["Volume_Normalized"] = (
-                                struct_data["Volume_mm3"] / icv
-                            ) * 100
-
-                    result["structures"].append(struct_data)
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Error parsing stats file {stats_file}: {e}")
-        return None
+                    data['measures'].append(measure)
+            elif current_section == 'structures':
+                # Parse structure header line
+                headers = [h.strip() for h in line.split()]
+                data['headers'] = headers
+            elif current_section == 'table':
+                # Parse structure data lines
+                values = [v.strip() for v in line.split()]
+                if len(values) == len(data.get('headers', [])):
+                    structure = dict(zip(data['headers'], values))
+                    data['table'].append(structure)
+    
+    return data
 
 
 def extract_brain_structures(aseg_data):
@@ -268,7 +227,7 @@ def extract_cortical_measures(aparc_data, hemisphere):
     return measures
 
 
-def load_fs_mapping(mapping_file=None):
+def load_fs_mapping(mapping_file: Optional[str] = None) -> Dict[str, Dict[str, str]]:
     """
     Load FreeSurfer to standard terminology mapping.
 
@@ -282,23 +241,17 @@ def load_fs_mapping(mapping_file=None):
     dict
         Mapping dictionary
     """
-    # Default mapping file location
-    if not mapping_file:
+    if mapping_file is None:
         mapping_file = FS_MAP_PATH
-
-    # If mapping file exists, load it
-    if os.path.exists(mapping_file):
-        try:
-            with open(mapping_file, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Error loading mapping file {mapping_file}: {e}")
-
-    # Return empty mapping if file not found or error
-    return {}
+        
+    if not os.path.exists(mapping_file):
+        raise FileNotFoundError(f"Mapping file not found: {mapping_file}")
+        
+    with open(mapping_file, 'r') as f:
+        return json.load(f)
 
 
-def map_fs_term(term, mapping_dict, category=None):
+def map_fs_term(term: str, mapping_dict: Dict[str, Dict[str, str]], category: Optional[str] = None) -> str:
     """
     Map a FreeSurfer term to standard terminology.
 
@@ -316,51 +269,30 @@ def map_fs_term(term, mapping_dict, category=None):
     str or None
         Mapped term if found, otherwise None
     """
-    if not mapping_dict or not term:
-        return None
-
-    # Normalize the term for lookup
+    if not term:
+        return ""
+        
+    # Normalize the term
     norm_term = safe_id(term)
-
-    # First check if this is a measure
-    if category == "measure" and "Measures" in mapping_dict:
-        if term in mapping_dict["Measures"]:
-            measure_info = mapping_dict["Measures"][term]
-            if "measureOf" in measure_info:
-                return measure_info["measureOf"]
-
-    # Check if this is a region/structure
-    if category == "region" and "Structures" in mapping_dict:
-        # First check for direct match
-        if term in mapping_dict["Structures"]:
-            struct_info = mapping_dict["Structures"][term]
-            if "isAbout" in struct_info and struct_info["isAbout"]:
-                if not struct_info["isAbout"].startswith("CUSTOM") and not struct_info[
-                    "isAbout"
-                ].startswith("<UNKNOWN"):
-                    return struct_info["isAbout"]
-
-        # Check for match in fskey lists
-        for struct_name, struct_info in mapping_dict["Structures"].items():
-            if "fskey" in struct_info and term in struct_info["fskey"]:
-                if "isAbout" in struct_info and struct_info["isAbout"]:
-                    if not struct_info["isAbout"].startswith(
-                        "CUSTOM"
-                    ) and not struct_info["isAbout"].startswith("<UNKNOWN"):
-                        return struct_info["isAbout"]
-
-    # Legacy approach for simpler mappings
+    
+    # First try exact match
     if norm_term in mapping_dict:
-        entry = mapping_dict[norm_term]
-
-        # If category specified, check category
-        if category and "category" in entry and entry["category"] != category:
-            return None
-
-        # Return the standard term
-        return entry.get("standard_term", None)
-
-    return None
+        return mapping_dict[norm_term].get('term', term)
+    
+    # Try fuzzy matching if no exact match
+    best_match = None
+    best_score = 0
+    
+    for fs_term, mapping in mapping_dict.items():
+        if category and mapping.get('category') != category:
+            continue
+            
+        score = fuzz.ratio(norm_term, fs_term)
+        if score > best_score and score >= MIN_MATCH_SCORE:
+            best_score = score
+            best_match = mapping.get('term', term)
+    
+    return best_match if best_match else term
 
 
 def get_segid(filename, structure):
