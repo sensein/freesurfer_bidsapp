@@ -80,20 +80,43 @@ def safe_id(text: str) -> str:
 
 def parse_fs_stats_file(stats_file: str) -> Dict[str, Any]:
     """
-    Parse a FreeSurfer stats file and extract measurements.
+    Parse a FreeSurfer stats file and extract measurements in a BIDS-compliant format.
 
     Parameters
     ----------
     stats_file : str or Path
-        Path to FreeSurfer stats file
+        Path to FreeSurfer stats file in BIDS derivatives format
 
     Returns
     -------
     dict
-        Dictionary with global measures and per-structure data
+        Dictionary with BIDS-compliant measurements and metadata
     """
-    data = {}
+    stats_file = Path(stats_file)
+    
+    # Validate BIDS naming convention
+    if not stats_file.name.endswith('.stats'):
+        raise ValueError(f"Invalid stats file: {stats_file}. Must end with .stats")
+    
+    # Extract BIDS entities from filename
+    entities = {}
+    for part in stats_file.stem.split('_'):
+        if '-' in part:
+            key, value = part.split('-', 1)
+            entities[key] = value
+    
+    data = {
+        'global_measures': {},
+        'structures': [],
+        'bids_metadata': {
+            'entities': entities,
+            'filename': stats_file.name,
+            'path': str(stats_file.relative_to(stats_file.parent.parent))
+        }
+    }
+    
     current_section = None
+    measure_units = {}
     
     with open(stats_file, 'r') as f:
         for line in f:
@@ -104,15 +127,12 @@ def parse_fs_stats_file(stats_file: str) -> Dict[str, Any]:
             # Check for section headers
             if line.startswith('# Measure'):
                 current_section = 'measures'
-                data[current_section] = []
                 continue
             elif line.startswith('# ColHeaders'):
                 current_section = 'structures'
-                data[current_section] = []
                 continue
             elif line.startswith('# TableCol'):
                 current_section = 'table'
-                data[current_section] = []
                 continue
                 
             # Skip comments and empty lines
@@ -124,13 +144,11 @@ def parse_fs_stats_file(stats_file: str) -> Dict[str, Any]:
                 # Parse measure lines (e.g., "BrainSeg, Brain Segmentation Volume, 1234567, mm^3")
                 parts = line.split(',')
                 if len(parts) >= 4:
-                    measure = {
-                        'name': parts[0].strip(),
-                        'description': parts[1].strip(),
-                        'value': float(parts[2].strip()),
-                        'unit': parts[3].strip()
-                    }
-                    data['measures'].append(measure)
+                    name = parts[0].strip()
+                    value = float(parts[2].strip())
+                    unit = parts[3].strip()
+                    data['global_measures'][name] = value
+                    measure_units[name] = unit
             elif current_section == 'structures':
                 # Parse structure header line
                 headers = [h.strip() for h in line.split()]
@@ -140,7 +158,18 @@ def parse_fs_stats_file(stats_file: str) -> Dict[str, Any]:
                 values = [v.strip() for v in line.split()]
                 if len(values) == len(data.get('headers', [])):
                     structure = dict(zip(data['headers'], values))
-                    data['table'].append(structure)
+                    # Add units to structure measurements
+                    for key, value in structure.items():
+                        if key in measure_units:
+                            structure[f"{key}_unit"] = measure_units[key]
+                    data['structures'].append(structure)
+    
+    # Add BIDS-specific metadata
+    data['bids_metadata'].update({
+        'measure_units': measure_units,
+        'file_type': 'stats',
+        'datatype': 'anat'  # FreeSurfer stats are always anatomical
+    })
     
     return data
 

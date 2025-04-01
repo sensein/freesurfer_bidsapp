@@ -250,7 +250,19 @@ def test_provenance_information(converter):
     
     # Check process information
     process = list(graph.subjects(RDF.type, NIDM.FreeSurferAnalysis))[0]
-    assert (process, PROV.wasAssociatedWith, software) in graph
+    
+    # Debug: Print all triples with the process as subject
+    print("\nProcess triples:")
+    for s, p, o in graph.triples((process, None, None)):
+        print(f"({s}, {p}, {o})")
+    
+    # Debug: Print all triples with the software as object
+    print("\nSoftware triples:")
+    for s, p, o in graph.triples((None, None, software)):
+        print(f"({s}, {p}, {o})")
+    
+    # Check the specific triple
+    assert (process, PROV.wasAssociatedWith, software) in graph, "Process should be associated with software"
 
 def test_error_handling():
     """Test error handling for invalid input."""
@@ -384,3 +396,45 @@ def test_subject_id_handling():
     
     # Test that both converters point to the same directory
     assert converter1.fs_subject_dir == converter2.fs_subject_dir 
+
+def test_version_tracking(converter):
+    """Test version tracking in NIDM output."""
+    # Convert to NIDM
+    output_file = converter.convert()
+    
+    # Load the NIDM graph
+    graph = Graph()
+    graph.parse(output_file, format="json-ld")
+    
+    # Get version information from the graph
+    from src.utils import get_version_info
+    version_info = get_version_info()
+    
+    # Check FreeSurfer software version
+    fs_software = list(graph.subjects(RDF.type, PROV.SoftwareAgent))[0]
+    assert (fs_software, DCTERMS.hasVersion, Literal(version_info["freesurfer"]["version"])) in graph
+    
+    # Check software source
+    if version_info["freesurfer"]["source"] != "unknown":
+        assert (fs_software, NIDM.versionSource, Literal(version_info["freesurfer"]["source"])) in graph
+    
+    # Check build stamp if available
+    if version_info["freesurfer"]["build_stamp"]:
+        assert (fs_software, FS.buildStamp, Literal(version_info["freesurfer"]["build_stamp"])) in graph
+    
+    # Check container image if available
+    if version_info["freesurfer"]["image"]:
+        assert (fs_software, FS.containerImage, Literal(version_info["freesurfer"]["image"])) in graph
+    
+    # Check BIDS-FreeSurfer version
+    bids_software = list(graph.subjects(RDF.type, PROV.SoftwareAgent))[1]  # Second software agent
+    assert (bids_software, DCTERMS.hasVersion, Literal(version_info["bids_freesurfer"]["version"])) in graph
+    assert (bids_software, NIDM.versionSource, Literal(version_info["bids_freesurfer"]["source"])) in graph
+    
+    # Check Python environment
+    env = list(graph.subjects(RDF.type, PROV.Location))[0]
+    assert (env, NIDM.pythonVersion, Literal(version_info["python"]["version"])) in graph
+    
+    # Check Python package versions
+    for package, version in version_info["python"]["packages"].items():
+        assert (env, NIDM.packageVersion, Literal(f"{package}:{version}")) in graph 

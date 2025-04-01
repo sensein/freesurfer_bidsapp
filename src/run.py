@@ -20,7 +20,7 @@ from bids.layout import BIDSLayout
 # Local modules
 from src.freesurfer.wrapper import FreeSurferWrapper
 from src.nidm.fs2nidm import FreeSurferToNIDM
-from src.utils import get_freesurfer_version, setup_logging
+from src.utils import get_freesurfer_version, setup_logging, get_version_info
 
 # Get version from package metadata
 try:
@@ -49,9 +49,19 @@ def process_participant(
     # Set logging level based on verbosity
     setup_logging(logging.DEBUG if verbose else logging.INFO)
 
+    # Get version information
+    version_info = get_version_info()
+
     # Print version and check environment
-    logger.info(f"BIDS-FreeSurfer version: {__version__}")
-    logger.info(f"FreeSurfer version: {get_freesurfer_version()}")
+    logger.info(f"BIDS-FreeSurfer version: {version_info['bids_freesurfer']['version']}")
+    logger.info(f"FreeSurfer version: {version_info['freesurfer']['version']}")
+    if version_info['freesurfer']['build_stamp']:
+        logger.info(f"FreeSurfer build stamp: {version_info['freesurfer']['build_stamp']}")
+    logger.info(f"Python version: {version_info['python']['version']}")
+    if version_info['python']['packages']:
+        logger.info("Python package versions:")
+        for package, version in version_info['python']['packages'].items():
+            logger.info(f"  {package}: {version}")
 
     # Convert all paths to Path objects
     bids_dir = Path(bids_dir)
@@ -138,11 +148,12 @@ def process_participant(
                     except Exception as e:
                         logger.error(f"Error converting {subject} to NIDM format: {str(e)}")
 
-        # Save processing summary
-        freesurfer_wrapper.save_processing_summary()
+        # Save processing summary with version information
+        summary = freesurfer_wrapper.get_processing_summary()
+        summary["version_info"] = version_info
+        freesurfer_wrapper.save_processing_summary(summary)
 
         # Print summary
-        summary = freesurfer_wrapper.get_processing_summary()
         logger.info("================================")
         logger.info("Processing complete!")
         logger.info(f"Total subjects/sessions processed: {summary['total']}")

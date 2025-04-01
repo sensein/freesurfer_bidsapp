@@ -12,6 +12,7 @@ The app implements:
 3. Multi-session data handling with appropriate processing paths
 4. NIDM format output generation for standardized data exchange
 5. BIDS provenance documentation for reproducibility
+6. Comprehensive version tracking for all components (FreeSurfer, BIDS app, Python packages)
 
 ## Installation
 
@@ -34,21 +35,28 @@ This BIDS App provides support for both Docker and Singularity/Apptainer, allowi
 
 ## Building Containers
 
-You can build the container images using the `setup.py` script:
+You can build the container images using these commands:
 
 ```bash
-# Build Docker image
+# Build Docker image (for local development)
 python setup.py docker
 
-# Build Singularity image
-python setup.py singularity
+# Build Singularity/Apptainer image on clusters
+apptainer build --fakeroot freesurfer.sif Singularity
 
-# Build both container images
-python setup.py containers
-
-# You can also combine with other setup.py commands
-python setup.py docker install
+# Or build in a custom location
+apptainer build --fakeroot /path/to/output/freesurfer.sif Singularity
 ```
+
+Note: For cluster environments, we use the `--fakeroot` option with Apptainer as it:
+1. Avoids permission issues common on shared systems
+2. Doesn't require root privileges
+3. Is specifically designed for HPC/cluster environments
+
+If you encounter permission issues, you may need to:
+1. Check if your user is configured for fakeroot (contact your system administrator)
+2. Ensure you have proper permissions in the build directory
+3. Try building in a directory where you have write permissions
 
 ## Docker Usage
 
@@ -65,21 +73,27 @@ docker run -v /path/to/license.txt:/license.txt \
 ## Singularity/Apptainer Usage
 
 ```bash
-# Run the container (binding the code repository)
-singularity run \
-  --bind $PWD:/app,/path/to/license.txt:/license.txt,/path/to/bids/data:/data,/path/to/output:/output \
-  freesurfer.sif \
+# Run the container
+apptainer run \
+  --bind /path/to/license.txt:/license.txt,/path/to/bids/data:/data,/path/to/output:/output \
+  /path/to/freesurfer.sif \
   --bids_dir /data \
   --output_dir /output
 ```
 
+Note: The application files are included in the container image, so there's no need to bind the repository directory. Only the license file, input data, and output directory need to be bound.
+
 ## HPC/Cluster Usage
 
-When running on an HPC cluster that only supports Singularity/Apptainer:
+When running on an HPC cluster that uses Apptainer:
 
-1. Build the Singularity image: `python setup.py singularity`
-2. Transfer the `freesurfer.sif` file to your cluster
-3. Create a job submission script like this:
+1. Build the container image:
+   ```bash
+   apptainer build --fakeroot freesurfer.sif Singularity
+   ```
+   Note: If you encounter permission issues, ensure your user is configured for fakeroot (contact your system administrator).
+
+2. Create a job submission script like this:
 
 ```bash
 #!/bin/bash
@@ -88,8 +102,6 @@ When running on an HPC cluster that only supports Singularity/Apptainer:
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 
-# Path to the repository on the cluster
-REPO_DIR=/path/to/repo
 # Path to the Singularity image
 SIF_FILE=/path/to/freesurfer.sif
 # Path to license file
@@ -98,14 +110,15 @@ LICENSE_FILE=/path/to/license.txt
 BIDS_DIR=/path/to/bids/data
 OUTPUT_DIR=/path/to/output
 
-singularity run \
-  --bind $REPO_DIR:/app,$LICENSE_FILE:/license.txt,$BIDS_DIR:/data,$OUTPUT_DIR:/output \
+apptainer run \
+  --bind $LICENSE_FILE:/license.txt,$BIDS_DIR:/data,$OUTPUT_DIR:/output \
   $SIF_FILE \
   --bids_dir /data \
   --output_dir /output \
   --participant_label sub-01 sub-02  # Add your subjects here
 ```
 
+Note: We no longer need to bind the repository directory since all required files are now included in the container image.
 
 ### Command-Line Arguments
 
@@ -126,21 +139,40 @@ singularity run \
 
 Process a single subject:
 ```bash
+# Using Docker (for local development)
 docker run -v /path/to/bids_dataset:/bids_dataset:ro \
            -v /path/to/output:/output \
            -v /path/to/freesurfer/license.txt:/license.txt \
            bids/freesurfer:8.0.0 \
            /bids_dataset /output participant --participant_label 01
+
+# Using Apptainer (for clusters)
+apptainer run \
+  --bind /path/to/license.txt:/license.txt,/path/to/bids_dataset:/data,/path/to/output:/output \
+  freesurfer.sif \
+  --bids_dir /data \
+  --output_dir /output \
+  --participant_label 01
 ```
 
 Process multiple subjects in parallel (using FreeSurfer's built-in parallelization):
 ```bash
+# Using Docker (for local development)
 docker run -v /path/to/bids_dataset:/bids_dataset:ro \
            -v /path/to/output:/output \
            -v /path/to/freesurfer/license.txt:/license.txt \
            bids/freesurfer:8.0.0 \
            /bids_dataset /output participant --fs_options="-parallel -openmp 4" \
            --participant_label 01 02 03
+
+# Using Apptainer (for clusters)
+apptainer run \
+  --bind /path/to/license.txt:/license.txt,/path/to/bids_dataset:/data,/path/to/output:/output \
+  freesurfer.sif \
+  --bids_dir /data \
+  --output_dir /output \
+  --fs_options="-parallel -openmp 4" \
+  --participant_label 01 02 03
 ```
 
 ## Outputs
@@ -153,26 +185,36 @@ docker run -v /path/to/bids_dataset:/bids_dataset:ro \
 ├── freesurfer/
 │   ├── dataset_description.json
 │   ├── sub-<participant_label>/
-│   │   ├── anat/
-│   │   │   ├── aparc+aseg.mgz
-│   │   │   ├── aseg.mgz
-│   │   │   ├── brainmask.mgz
-│   │   │   └── T1.mgz
-│   │   ├── label/
-│   │   ├── stats/
-│   │   │   ├── aseg.stats
-│   │   │   ├── lh.aparc.stats
-│   │   │   └── rh.aparc.stats
-│   │   ├── surf/
-│   │   │   ├── lh.pial
-│   │   │   ├── lh.white
-│   │   │   ├── rh.pial
-│   │   │   └── rh.white
-│   │   └── provenance.json
+│   │   ├── ses-<session_label>/  # Optional session directory
+│   │   │   ├── anat/
+│   │   │   │   ├── aparc+aseg.mgz
+│   │   │   │   ├── aseg.mgz
+│   │   │   │   ├── brainmask.mgz
+│   │   │   │   └── T1.mgz
+│   │   │   ├── label/
+│   │   │   ├── stats/
+│   │   │   │   ├── aseg.stats
+│   │   │   │   ├── lh.aparc.stats
+│   │   │   │   └── rh.aparc.stats
+│   │   │   ├── surf/
+│   │   │   │   ├── lh.pial
+│   │   │   │   ├── lh.white
+│   │   │   │   ├── rh.pial
+│   │   │   │   └── rh.white
+│   │   │   └── provenance.json
+│   │   └── anat/  # For single-session data
+│   │       ├── aparc+aseg.mgz
+│   │       ├── aseg.mgz
+│   │       ├── brainmask.mgz
+│   │       └── T1.mgz
 └── nidm/
     ├── dataset_description.json
     └── sub-<participant_label>/
-        └── prov.jsonld
+        ├── ses-<session_label>/  # Optional session directory
+        │   ├── prov.jsonld
+        │   └── prov.ttl
+        ├── prov.jsonld  # For single-session data
+        └── prov.ttl
 ```
 
 ### FreeSurfer Output
@@ -185,9 +227,12 @@ The FreeSurfer outputs follow standard FreeSurfer conventions but are organized 
 
 ### NIDM Output
 
-The NIDM outputs are provided in JSON-LD format (`prov.jsonld`), which includes:
+The NIDM outputs are provided in both JSON-LD (`prov.jsonld`) and Turtle (`prov.ttl`) formats, which include:
 
-- FreeSurfer version information
+- Comprehensive version information:
+  - FreeSurfer version and source (from base image)
+  - BIDS app version (from setup.py)
+  - Python environment and package versions
 - Processing provenance
 - Volume measurements for brain structures
 - Cortical thickness and surface area measurements

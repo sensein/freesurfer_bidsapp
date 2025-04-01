@@ -12,11 +12,12 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+import datetime
 
 
 def get_freesurfer_version():
     """
-    Get FreeSurfer version string.
+    Get FreeSurfer version string from Dockerfile.
 
     Returns
     -------
@@ -24,33 +25,21 @@ def get_freesurfer_version():
         FreeSurfer version string, or "unknown" if not available
     """
     try:
-        # Try to get version from recon-all command
-        result = subprocess.run(
-            ["recon-all", "--version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-
-        # Parse version from output (e.g., "freesurfer-linux-ubuntu16_x86_64-7.2.0")
-        output = result.stdout
-        version_match = re.search(r"freesurfer.+?(\d+\.\d+\.\d+)", output)
-
-        if version_match:
-            return version_match.group(1)
-
-        # If the above doesn't work, try reading build-stamp.txt
-        fs_home = os.environ.get("FREESURFER_HOME")
-        if fs_home:
-            build_stamp_path = Path(fs_home) / "build-stamp.txt"
-            if build_stamp_path.exists():
-                with open(build_stamp_path, "r") as f:
-                    build_stamp = f.read().strip()
-                    return build_stamp
+        # Read version from Dockerfile
+        dockerfile_path = Path(__file__).parent.parent / "Dockerfile"
+        if dockerfile_path.exists():
+            with open(dockerfile_path, "r") as f:
+                for line in f:
+                    if line.startswith("FROM"):
+                        # Extract version from image name (e.g., "FROM vnmd/freesurfer_8.0.0")
+                        image = line.strip().split()[1]
+                        version_match = re.search(r"(\d+\.\d+\.\d+)", image)
+                        if version_match:
+                            return version_match.group(1)
 
         return "unknown"
     except Exception as e:
-        logging.warning(f"Failed to get FreeSurfer version: {str(e)}")
+        logging.warning(f"Failed to get FreeSurfer version from Dockerfile: {str(e)}")
         return "unknown"
 
 def setup_logging(log_level=logging.INFO, log_file=None):
@@ -171,3 +160,99 @@ def validate_bids_dataset(bids_dir, validate=True):
     except Exception as e:
         logging.error(f"Failed to validate BIDS dataset: {str(e)}")
         raise ValueError(f"Invalid BIDS dataset: {str(e)}")
+
+
+def get_version_info():
+    """
+    Get comprehensive version information for the application.
+
+    Returns
+    -------
+    dict
+        Dictionary containing version information for all components
+    """
+    version_info = {
+        "bids_freesurfer": {
+            "version": "unknown",
+            "source": "package",
+            "timestamp": datetime.datetime.now().isoformat()
+        },
+        "freesurfer": {
+            "version": get_freesurfer_version(),
+            "source": "base_image",
+            "build_stamp": None,
+            "image": None
+        },
+        "python": {
+            "version": sys.version,
+            "packages": {}
+        }
+    }
+
+    # Get BIDS app version from setup.py
+    try:
+        setup_path = Path(__file__).parent.parent / "setup.py"
+        if setup_path.exists():
+            with open(setup_path, "r") as f:
+                for line in f:
+                    if line.startswith('    version="'):
+                        version = line.strip().split('"')[1]
+                        version_info["bids_freesurfer"]["version"] = version
+                        version_info["bids_freesurfer"]["source"] = "setup.py"
+                        break
+    except Exception as e:
+        logging.warning(f"Failed to read setup.py: {str(e)}")
+
+    # Fallback to package version if setup.py not available
+    if version_info["bids_freesurfer"]["version"] == "unknown":
+        try:
+            from importlib.metadata import version
+            version_info["bids_freesurfer"]["version"] = version("bids-freesurfer")
+            version_info["bids_freesurfer"]["source"] = "package"
+        except ImportError:
+            try:
+                from pkg_resources import get_distribution
+                version_info["bids_freesurfer"]["version"] = get_distribution("bids-freesurfer").version
+            except Exception:
+                pass
+
+    # Get FreeSurfer image from Dockerfile
+    try:
+        dockerfile_path = Path(__file__).parent.parent / "Dockerfile"
+        if dockerfile_path.exists():
+            with open(dockerfile_path, "r") as f:
+                for line in f:
+                    if line.startswith("FROM"):
+                        # Extract image name (e.g., "FROM vnmd/freesurfer_8.0.0")
+                        image = line.strip().split()[1]
+                        version_info["freesurfer"]["image"] = image
+                        # Extract version from image name
+                        if "_" in image:
+                            version_info["freesurfer"]["version"] = image.split("_")[-1]
+    except Exception as e:
+        logging.warning(f"Failed to read Dockerfile: {str(e)}")
+
+    # Get build stamp if available (as additional information)
+    fs_home = os.environ.get("FREESURFER_HOME")
+    if fs_home:
+        build_stamp_path = Path(fs_home) / "build-stamp.txt"
+        if build_stamp_path.exists():
+            try:
+                with open(build_stamp_path, "r") as f:
+                    build_stamp = f.read().strip()
+                    version_info["freesurfer"]["build_stamp"] = build_stamp
+            except Exception as e:
+                logging.warning(f"Failed to read build-stamp.txt: {str(e)}")
+
+    # Get Python package versions
+    try:
+        import pkg_resources
+        for package in ["numpy", "pandas", "nibabel", "bids", "rdflib"]:
+            try:
+                version_info["python"]["packages"][package] = pkg_resources.get_distribution(package).version
+            except pkg_resources.DistributionNotFound:
+                pass
+    except Exception:
+        pass
+
+    return version_info

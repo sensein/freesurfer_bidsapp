@@ -36,7 +36,7 @@ logger = logging.getLogger("bids-freesurfer.fs2nidm")
 # Define namespaces
 NIDM = Namespace("http://purl.org/nidash/nidm#")
 NIIRI = Namespace("http://iri.nidash.org/")
-FS = Namespace("http://surfer.nmr.mgh.harvard.edu/fs/terms/")
+FS = Namespace("http://purl.org/nidash/freesurfer#")
 BIDS = Namespace("http://bids.neuroimaging.io/terms/")
 NDAR = Namespace("https://ndar.nih.gov/api/datadictionary/v2/dataelement/")
 SIO = Namespace("http://semanticscience.org/resource/")
@@ -237,29 +237,53 @@ class FreeSurferToNIDM:
         return None
 
     def _add_basic_provenance(self):
-        """Add basic provenance information to the NIDM graph."""
-        # Add software information
+        """Add basic provenance information to the graph."""
+        # Get version information
+        from src.utils import get_version_info
+        version_info = get_version_info()
+
+        # Add FreeSurfer software information
         self.fs_software = NIIRI[f"software-{uuid4()}"]
-        self.graph.add((self.fs_software, RDF.type, NIDM.Software))
         self.graph.add((self.fs_software, RDF.type, PROV.SoftwareAgent))
         self.graph.add((self.fs_software, NIDM.label, Literal("FreeSurfer")))
         self.graph.add((self.fs_software, NIDM.neuroimagingAnalysisSoftware, URIRef("http://surfer.nmr.mgh.harvard.edu/")))
         
-        # Add version information
-        version = self._get_fs_version()
-        if version:
-            self.graph.add((self.fs_software, DCTERMS.hasVersion, Literal(version)))
-        else:
-            self.graph.add((self.fs_software, DCTERMS.hasVersion, Literal("unknown")))
+        # Add FreeSurfer version information
+        self.graph.add((self.fs_software, DCTERMS.hasVersion, Literal(version_info["freesurfer"]["version"])))
+        self.graph.add((self.fs_software, NIDM.versionSource, Literal(version_info["freesurfer"]["source"])))
         
-        # Add timestamp
-        self.graph.add((self.fs_software, PROV.generatedAtTime, Literal(datetime.datetime.now().isoformat())))
+        # Add container image if available
+        if version_info["freesurfer"]["image"]:
+            self.graph.add((self.fs_software, FS.containerImage, Literal(version_info["freesurfer"]["image"])))
         
+        # Add build stamp if available
+        if version_info["freesurfer"]["build_stamp"]:
+            self.graph.add((self.fs_software, FS.buildStamp, Literal(version_info["freesurfer"]["build_stamp"])))
+
+        # Add BIDS-FreeSurfer software information
+        bids_software = NIIRI[f"software-{uuid4()}"]
+        self.graph.add((bids_software, RDF.type, PROV.SoftwareAgent))
+        self.graph.add((bids_software, NIDM.label, Literal("BIDS-FreeSurfer")))
+        self.graph.add((bids_software, DCTERMS.hasVersion, Literal(version_info["bids_freesurfer"]["version"])))
+        self.graph.add((bids_software, NIDM.versionSource, Literal(version_info["bids_freesurfer"]["source"])))
+
+        # Add Python environment information
+        env = NIIRI[f"environment-{uuid4()}"]
+        self.graph.add((env, RDF.type, PROV.Location))
+        self.graph.add((env, NIDM.label, Literal("Python Environment")))
+        
+        # Add Python version as a property of the environment
+        self.graph.add((env, NIDM.pythonVersion, Literal(version_info["python"]["version"])))
+        
+        # Add Python package versions
+        for package, version in version_info["python"]["packages"].items():
+            self.graph.add((env, NIDM.packageVersion, Literal(f"{package}:{version}")))
+
         # Add subject information
         self.subject_uri = NIIRI[f"subject-{self.subject_id}"]
         self.graph.add((self.subject_uri, RDF.type, NIDM.Subject))
         self.graph.add((self.subject_uri, NIDM.label, Literal(self.subject_id)))
-        
+
         # Add session information if available
         if self.session_label:
             session_uri = NIIRI[f"session-{self.session_label}"]
@@ -267,24 +291,29 @@ class FreeSurferToNIDM:
             self.graph.add((session_uri, NIDM.label, Literal(self.session_label)))
             self.graph.add((self.subject_uri, URIRef("http://bids.neuroimaging.io/terms/session_id"), Literal(self.session_label)))
             self.graph.add((session_uri, PROV.wasAssociatedWith, self.subject_uri))
-        
+
         # Add process information
         self.fs_process = NIIRI[f"process-{uuid4()}"]
         self.graph.add((self.fs_process, RDF.type, NIDM.FreeSurferAnalysis))
         self.graph.add((self.fs_process, PROV.wasAssociatedWith, self.fs_software))
+        self.graph.add((self.fs_process, PROV.wasAssociatedWith, bids_software))
         self.graph.add((self.fs_process, PROV.used, self.subject_uri))
         if self.session_label:
             self.graph.add((self.fs_process, PROV.used, session_uri))
-        
+
+        # Add timestamp to process
+        self.graph.add((self.fs_process, PROV.startedAtTime, Literal(version_info["bids_freesurfer"]["timestamp"])))
+
         # Add project information
         project_uri = NIIRI[f"project-{uuid4()}"]
         self.graph.add((project_uri, RDF.type, NIDM.Project))
         self.graph.add((project_uri, NIDM.label, Literal("FreeSurfer Analysis")))
         self.graph.add((project_uri, PROV.wasAssociatedWith, self.fs_software))
+        self.graph.add((project_uri, PROV.wasAssociatedWith, bids_software))
         self.graph.add((project_uri, PROV.wasGeneratedBy, self.fs_process))
 
     def _process_stats_files(self):
-        """Process FreeSurfer stats files and add to RDF graph."""
+        """Process FreeSurfer stats files and add them to the graph."""
         stats_dir = self.fs_subject_dir / "stats"
         if not stats_dir.exists():
             logger.warning(f"Stats directory not found: {stats_dir}")
@@ -293,56 +322,88 @@ class FreeSurferToNIDM:
         # Process aseg.stats
         aseg_file = stats_dir / "aseg.stats"
         if aseg_file.exists():
-            self._process_stats_file(aseg_file, "aseg")
+            container_id = f"aseg-{self.subject_id}"
+            container_uri = NIIRI[container_id]
+            
+            # Add container to graph with proper type and connections
+            self.graph.add((container_uri, RDF.type, FS.SegmentationStatistics))
+            self.graph.add((container_uri, NIDM.label, Literal(f"ASEG Statistics for {self.subject_id}")))
+            self.graph.add((container_uri, PROV.wasGeneratedBy, self.fs_process))
+            self.graph.add((self.subject_uri, FS.hasSegmentationStatistics, container_uri))
+            self.graph.add((container_uri, NIDM.hasFile, Literal(str(aseg_file))))  # Add file path
+            
+            # Process the stats file
+            stats_data = parse_fs_stats_file(aseg_file)
+            if stats_data:
+                # Add global measures
+                for measure, value in stats_data.get('global_measures', {}).items():
+                    measure_uri = NIIRI[f"{container_id}-{safe_id(measure)}"]
+                    self.graph.add((measure_uri, RDF.type, NIDM.Measure))
+                    self.graph.add((measure_uri, NIDM.label, Literal(measure)))
+                    self.graph.add((measure_uri, NIDM.value, Literal(value)))
+                    self.graph.add((container_uri, NIDM.hasMeasure, measure_uri))
+                
+                # Add structure data
+                for struct in stats_data.get('structures', []):
+                    struct_uri = NIIRI[f"{container_id}-{safe_id(struct.get('StructName', ''))}"]
+                    self.graph.add((struct_uri, RDF.type, NIDM.Structure))
+                    self.graph.add((struct_uri, NIDM.label, Literal(struct.get('StructName', ''))))
+                    self.graph.add((container_uri, NIDM.hasStructure, struct_uri))
+                    
+                    # Add structure measures
+                    for key, value in struct.items():
+                        if key != 'StructName':
+                            measure_uri = NIIRI[f"{struct_uri}-{safe_id(key)}"]
+                            self.graph.add((measure_uri, RDF.type, NIDM.Measure))
+                            self.graph.add((measure_uri, NIDM.label, Literal(key)))
+                            self.graph.add((measure_uri, NIDM.value, Literal(value)))
+                            self.graph.add((struct_uri, NIDM.hasMeasure, measure_uri))
+            
             self.processed_files.add("aseg.stats")
 
-        # Process parcellation files
-        for filename in stats_dir.glob("*.aparc*.stats"):
-            name = filename.name
-            parts = name.split(".")
-
-            if len(parts) == 3:  # Standard aparc (lh.aparc.stats)
-                hemisphere = parts[0]  # lh or rh
-                atlas = "aparc"
-            else:  # Extended atlas (lh.aparc.a2009s.stats)
-                hemisphere = parts[0]  # lh or rh
-                atlas = parts[2]  # a2009s, DKTatlas, etc.
-
-            self._process_stats_file(
-                filename, "aparc", hemisphere=hemisphere, atlas=atlas
-            )
-            self.processed_files.add(name)
-
-        # Process other stats files
-        for special_file in ["wmparc.stats", "brainvol.stats", "entowm.stats"]:
-            file_path = stats_dir / special_file
-            if file_path.exists():
-                self._process_stats_file(file_path, special_file.split(".")[0])
-                self.processed_files.add(special_file)
-
-        # Process surface measurements
-        surf_dir = self.fs_subject_dir / "surf"
-        if surf_dir.exists():
-            # Process thickness
-            for hemi in ["lh", "rh"]:
-                thickness_file = surf_dir / f"{hemi}.thickness"
-                if thickness_file.exists():
-                    self._process_surface_file(thickness_file, "thickness", hemi)
-                    self.processed_files.add(f"{hemi}.thickness")
-
-            # Process area
-            for hemi in ["lh", "rh"]:
-                area_file = surf_dir / f"{hemi}.area"
-                if area_file.exists():
-                    self._process_surface_file(area_file, "area", hemi)
-                    self.processed_files.add(f"{hemi}.area")
-
-            # Process curvature
-            for hemi in ["lh", "rh"]:
-                curv_file = surf_dir / f"{hemi}.curv"
-                if curv_file.exists():
-                    self._process_surface_file(curv_file, "curvature", hemi)
-                    self.processed_files.add(f"{hemi}.curv")
+        # Process aparc.stats for each hemisphere
+        for hemi in ['lh', 'rh']:
+            aparc_file = stats_dir / f"{hemi}.aparc.stats"
+            if aparc_file.exists():
+                container_id = f"aparc-{hemi}-{self.subject_id}"
+                container_uri = NIIRI[container_id]
+                
+                # Add container to graph with proper type and connections
+                self.graph.add((container_uri, RDF.type, FS.CorticalStatistics))
+                self.graph.add((container_uri, NIDM.label, Literal(f"{hemi.upper()} Cortical Statistics for {self.subject_id}")))
+                self.graph.add((container_uri, PROV.wasGeneratedBy, self.fs_process))
+                self.graph.add((self.subject_uri, FS.hasCorticalStatistics, container_uri))
+                self.graph.add((container_uri, FS.hemisphere, Literal(hemi)))
+                self.graph.add((container_uri, NIDM.hasFile, Literal(str(aparc_file))))  # Add file path
+                
+                # Process the stats file
+                stats_data = parse_fs_stats_file(aparc_file)
+                if stats_data:
+                    # Add global measures
+                    for measure, value in stats_data.get('global_measures', {}).items():
+                        measure_uri = NIIRI[f"{container_id}-{safe_id(measure)}"]
+                        self.graph.add((measure_uri, RDF.type, NIDM.Measure))
+                        self.graph.add((measure_uri, NIDM.label, Literal(measure)))
+                        self.graph.add((measure_uri, NIDM.value, Literal(value)))
+                        self.graph.add((container_uri, NIDM.hasMeasure, measure_uri))
+                    
+                    # Add structure data
+                    for struct in stats_data.get('structures', []):
+                        struct_uri = NIIRI[f"{container_id}-{safe_id(struct.get('StructName', ''))}"]
+                        self.graph.add((struct_uri, RDF.type, NIDM.Structure))
+                        self.graph.add((struct_uri, NIDM.label, Literal(struct.get('StructName', ''))))
+                        self.graph.add((container_uri, NIDM.hasStructure, struct_uri))
+                        
+                        # Add structure measures
+                        for key, value in struct.items():
+                            if key != 'StructName':
+                                measure_uri = NIIRI[f"{struct_uri}-{safe_id(key)}"]
+                                self.graph.add((measure_uri, RDF.type, NIDM.Measure))
+                                self.graph.add((measure_uri, NIDM.label, Literal(key)))
+                                self.graph.add((measure_uri, NIDM.value, Literal(value)))
+                                self.graph.add((struct_uri, NIDM.hasMeasure, measure_uri))
+                
+                self.processed_files.add(f"{hemi}.aparc.stats")
 
     def _process_surface_file(self, surface_file, measure_type, hemisphere):
         """
@@ -390,220 +451,6 @@ class FreeSurferToNIDM:
 
         except Exception as e:
             logger.warning(f"Error processing surface file {surface_file}: {str(e)}")
-
-    def _process_stats_file(self, stats_file, stats_type, hemisphere=None, atlas=None):
-        """
-        Process a FreeSurfer stats file.
-
-        Parameters
-        ----------
-        stats_file : Path
-            Path to stats file
-        stats_type : str
-            Type of stats file ('aseg', 'aparc', etc.)
-        hemisphere : str, optional
-            Hemisphere ('lh' or 'rh') for cortical stats
-        atlas : str, optional
-            Atlas name for cortical stats
-        """
-        logger.info(f"Processing {stats_file.name}")
-
-        # Parse the stats file
-        data = parse_fs_stats_file(stats_file)
-        if not data:
-            logger.warning(f"Failed to parse {stats_file}")
-            return
-
-        # Create a container for the stats
-        container_id = f"{stats_type}-{self.subject_id}"
-        if hemisphere:
-            container_id = f"{hemisphere}-{atlas}-{self.subject_id}"
-
-        container_uri = NIIRI[container_id]
-
-        # Add container metadata
-        if stats_type == "aseg":
-            self.graph.add((container_uri, RDF.type, FS.SegmentationStatistics))
-            self.graph.add(
-                (
-                    container_uri,
-                    RDFS.label,
-                    Literal("Subcortical Segmentation Statistics"),
-                )
-            )
-            self.graph.add(
-                (self.subject_uri, FS.hasSegmentationStatistics, container_uri)
-            )
-        elif stats_type == "aparc":
-            self.graph.add((container_uri, RDF.type, FS.CorticalParcellationStatistics))
-            self.graph.add(
-                (
-                    container_uri,
-                    RDFS.label,
-                    Literal(
-                        f"{hemisphere.upper()} {atlas} Cortical Parcellation Statistics"
-                    ),
-                )
-            )
-            self.graph.add((container_uri, FS.hemisphere, Literal(hemisphere)))
-            self.graph.add((container_uri, FS.atlas, Literal(atlas)))
-            self.graph.add(
-                (self.subject_uri, FS.hasCorticalParcellationStatistics, container_uri)
-            )
-        else:
-            self.graph.add((container_uri, RDF.type, FS.SpecializedStatistics))
-            self.graph.add(
-                (
-                    container_uri,
-                    RDFS.label,
-                    Literal(f"{stats_type.capitalize()} Statistics"),
-                )
-            )
-            self.graph.add(
-                (self.subject_uri, FS.hasSpecializedStatistics, container_uri)
-            )
-
-        # Add file info
-        self.graph.add((container_uri, PROV.wasGeneratedBy, self.fs_process))
-        self.graph.add((container_uri, NIDM.hasFile, Literal(str(stats_file))))
-
-        # Add global measures
-        for name, value in data["global_measures"].items():
-            measure_uri = NIIRI[f"{container_id}-measure-{safe_id(name)}"]
-            self.graph.add((container_uri, FS[safe_id(name)], measure_uri))
-            self.graph.add((measure_uri, RDF.type, FS.Measurement))
-            self.graph.add((measure_uri, NIDM.label, Literal(name)))
-            self.graph.add((measure_uri, FS.value, Literal(value, datatype=XSD.float)))
-
-            # Add standard term mapping if available
-            std_term = map_fs_term(name, self.fs_mappings, "measure")
-            if std_term:
-                self.graph.add((measure_uri, RDFS.seeAlso, URIRef(std_term)))
-
-            # Try to find match in CDE graph using fuzzy matching
-            if self.cde_graph:
-                # Find matching term in CDE graph
-                matches = self._find_matching_cde_terms(name)
-                if matches:
-                    best_match = matches[0]  # Use the best match
-                    self.graph.add((measure_uri, RDFS.seeAlso, URIRef(best_match)))
-
-        # Add structures/regions
-        for i, struct in enumerate(data["structures"]):
-            if "StructName" not in struct:
-                continue
-
-            name = struct["StructName"]
-            struct_uri = NIIRI[f"{container_id}-region-{i}-{safe_id(name)}"]
-
-            # Add appropriate type based on stats_type
-            if stats_type == "aseg":
-                self.graph.add((container_uri, FS.hasStructure, struct_uri))
-                self.graph.add((struct_uri, RDF.type, FS.BrainStructure))
-            elif stats_type == "aparc":
-                self.graph.add((container_uri, FS.hasRegion, struct_uri))
-                self.graph.add((struct_uri, RDF.type, FS.CorticalRegion))
-                self.graph.add((struct_uri, FS.hemisphere, Literal(hemisphere)))
-            else:
-                self.graph.add((container_uri, FS.hasStatisticsItem, struct_uri))
-                self.graph.add((struct_uri, RDF.type, FS.StatisticsItem))
-
-            # Add label
-            self.graph.add((struct_uri, NIDM.label, Literal(name)))
-
-            # Add properties
-            for key, value in struct.items():
-                if key == "StructName":
-                    continue
-
-                property_id = safe_id(key)
-                try:
-                    if isinstance(value, (int, float)):
-                        self.graph.add(
-                            (
-                                struct_uri,
-                                FS[property_id],
-                                Literal(
-                                    value,
-                                    datatype=(
-                                        XSD.float
-                                        if isinstance(value, float)
-                                        else XSD.integer
-                                    ),
-                                ),
-                            )
-                        )
-                    else:
-                        self.graph.add((struct_uri, FS[property_id], Literal(value)))
-                except Exception as e:
-                    logger.warning(f"Error adding property {key}: {e}")
-
-            # Add standard term mapping if available
-            std_term = map_fs_term(name, self.fs_mappings, "region")
-            if std_term:
-                self.graph.add((struct_uri, RDFS.seeAlso, URIRef(std_term)))
-
-            # Try to find match in CDE graph using fuzzy matching
-            if self.cde_graph:
-                # Find matching term in CDE graph
-                matches = self._find_matching_cde_terms(name, type="region")
-                if matches:
-                    best_match = matches[0]  # Use the best match
-                    self.graph.add((struct_uri, RDFS.seeAlso, URIRef(best_match)))
-
-    def _find_matching_cde_terms(self, term, type="measure"):
-        """
-        Find matching terms in the CDE graph using fuzzy matching.
-
-        Parameters
-        ----------
-        term : str
-            The term to match
-        type : str
-            The type of term to match ('measure' or 'region')
-
-        Returns
-        -------
-        list
-            List of matching URIs, ordered by match score
-        """
-        if not self.cde_graph:
-            return []
-
-        # Get all labels from CDE graph
-        query = """
-            prefix fs: <https://surfer.nmr.mgh.harvard.edu/>
-            prefix nidm: <http://purl.org/nidash/nidm#>
-            prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-
-            select ?uuid ?label
-            where {
-                ?uuid a fs:DataElement ;
-                    rdfs:label ?label .
-                }
-        """
-
-        qres = self.cde_graph.query(query)
-
-        # Calculate fuzzy match scores
-        match_scores = {}
-        for row in qres:
-            uuid = str(row[0])
-            label = str(row[1]).lower()
-
-            # Calculate match score
-            score = fuzz.token_sort_ratio(term.lower(), label)
-
-            if score > MIN_MATCH_SCORE:
-                match_scores[uuid] = score
-
-        # Sort by score and return URIs
-        return [
-            k
-            for k, v in sorted(
-                match_scores.items(), key=lambda item: item[1], reverse=True
-            )
-        ]
 
     def _process_mri_files(self):
         """Process FreeSurfer MRI volume files and add to RDF graph."""
@@ -697,9 +544,6 @@ class FreeSurferToNIDM:
             logger.info(f"Converting FreeSurfer outputs for {self.subject_id} to NIDM")
             logger.info(f"Output directory: {self.output_dir}")
 
-            # Add basic provenance information
-            self._add_basic_provenance()
-
             # Process FreeSurfer stats files
             self._process_stats_files()
 
@@ -712,7 +556,7 @@ class FreeSurferToNIDM:
                     "nidm": "http://purl.org/nidash/nidm#",
                     "niiri": "http://iri.nidash.org/",
                     "prov": "http://www.w3.org/ns/prov#",
-                    "fs": "http://surfer.nmr.mgh.harvard.edu/fs/terms/",
+                    "fs": "http://purl.org/nidash/freesurfer#",
                     "bids": "http://bids.neuroimaging.io/terms/",
                     "dcterms": "http://purl.org/dc/terms/",
                     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
@@ -735,6 +579,7 @@ class FreeSurferToNIDM:
                 output_file = self.output_dir / f"prov-sub-{self.subject_id}.jsonld"
                 turtle_file = self.output_dir / f"prov-sub-{self.subject_id}.ttl"
             
+            # First serialize to JSON-LD
             jsonld_data = self.graph.serialize(format="json-ld", indent=4)
             
             # Parse the graph data and merge with context
@@ -749,6 +594,7 @@ class FreeSurferToNIDM:
                 json.dump(context, f, indent=4)
             logger.info(f"Wrote JSON-LD file to: {output_file}")
 
+            # Also serialize to Turtle for verification
             self.graph.serialize(destination=str(turtle_file), format="turtle")
             logger.info(f"Wrote Turtle file to: {turtle_file}")
 

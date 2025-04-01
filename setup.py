@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 from setuptools import find_packages, setup
 
@@ -16,32 +17,55 @@ def build_docker():
     return True
 
 
-def build_singularity():
-    """Build Singularity container"""
-    print("Building Singularity image...")
+def build_singularity(output_path=None):
+    """Build Singularity/Apptainer container"""
+    print("Building container image...")
     try:
-        # Try singularity command first, then apptainer if available
+        # Check for apptainer first (more common on clusters), then singularity
         if (
-            subprocess.run(["which", "singularity"], capture_output=True).returncode
-            == 0
-        ):
-            subprocess.run(
-                ["singularity", "build", "freesurfer.sif", "Singularity"], check=True
-            )
-        elif (
             subprocess.run(["which", "apptainer"], capture_output=True).returncode == 0
         ):
-            subprocess.run(
-                ["apptainer", "build", "freesurfer.sif", "Singularity"], check=True
-            )
-        else:
-            print("Neither singularity nor apptainer found. Cannot build image.")
+            print("\nDetected Apptainer on cluster environment.")
+            print("For cluster environments, please build directly with apptainer:")
+            print("\napptainer build --remote freesurfer.sif Singularity")
+            print("or")
+            print("apptainer build --fakeroot freesurfer.sif Singularity\n")
             return False
-        print("Singularity image built successfully")
+        elif (
+            subprocess.run(["which", "singularity"], capture_output=True).returncode == 0
+        ):
+            container_cmd = "singularity"
+        else:
+            print("Neither apptainer nor singularity found. Cannot build image.")
+            return False
+
+        # Use custom output path if provided, otherwise use default
+        output_file = output_path if output_path else "freesurfer.sif"
+        output_file = str(Path(output_file).resolve())
+        
+        # Build command
+        cmd = [container_cmd, "build"]
+        
+        # For regular Singularity installations, try fakeroot if available
+        if subprocess.run(["which", "fakeroot"], capture_output=True).returncode == 0:
+            cmd.append("--fakeroot")
+        
+        # Add output file and Singularity definition
+        cmd.extend([output_file, "Singularity"])
+        
+        print(f"Running command: {' '.join(cmd)}")
+        
+        # Run the build command
+        subprocess.run(cmd, check=True)
+        print(f"Container image built successfully at: {output_file}")
+        return True
     except subprocess.CalledProcessError as e:
-        print(f"Singularity build failed: {e}")
+        print(f"Build failed: {e}")
+        print("\nFor cluster environments, please build directly with apptainer:")
+        print("apptainer build --remote freesurfer.sif Singularity")
+        print("or")
+        print("apptainer build --fakeroot freesurfer.sif Singularity")
         return False
-    return True
 
 
 # Check if we're being called with a container build command
@@ -53,7 +77,11 @@ if len(sys.argv) > 1 and sys.argv[1] in ["docker", "singularity", "containers"]:
     if command == "docker":
         build_docker()
     elif command == "singularity":
-        build_singularity()
+        # Check for custom output path in the next argument
+        output_path = None
+        if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+            output_path = sys.argv.pop(1)
+        build_singularity(output_path)
     elif command == "containers":
         build_docker()
         build_singularity()

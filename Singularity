@@ -1,38 +1,35 @@
 Bootstrap: docker
 From: vnmd/freesurfer_8.0.0
 
-%post
-    # Install additional Python dependencies
-    apt-get update && apt-get install -y \
-        python3 \
-        python3-pip \
-        python3-setuptools \
-        git \
-        && rm -rf /var/lib/apt/lists/*
-
-    # Create opt directory for application code
-    mkdir -p /opt
-    
-    # Install Python dependencies
-    cd /opt
-    pip3 install --no-cache-dir -r requirements.txt
-    # If you have a setup.py, also install the package
-    pip3 install -e .
-
 %files
     ./src /opt/src
     ./requirements.txt /opt/requirements.txt
     ./setup.py /opt/setup.py
     ./setup.cfg /opt/setup.cfg
 
+%post
+    # Create opt directory for application code
+    mkdir -p /opt
+    
+    # Install pip using get-pip.py
+    curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+    python3 get-pip.py --user
+    rm get-pip.py
+    
+    # Install Python dependencies in user mode to avoid permission issues
+    cd /opt
+    python3 -m pip install --user -r requirements.txt
+    python3 -m pip install --user -e .
+
 %environment
     # Set runtime license path to match BABS mount point
     export FS_LICENSE=/SGLR/FREESURFER_HOME/license.txt
-    # Add opt to Python path
+    # Add opt and local Python packages to path
     export PYTHONPATH=/opt:$PYTHONPATH
+    export PATH=/root/.local/bin:$PATH
 
 %runscript
-    # Execute the Python entry point directly, assuming input/output paths are provided as arguments
+    # Execute the Python entry point directly
     python3 /opt/src/run.py "$@"
 
 %help
