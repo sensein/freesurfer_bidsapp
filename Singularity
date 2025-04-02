@@ -13,20 +13,21 @@ From: vnmd/freesurfer_8.0.0
     
     # Install pip using get-pip.py
     curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-    python3 get-pip.py --user
+    python3 get-pip.py
     rm get-pip.py
     
-    # Install Python dependencies in user mode to avoid permission issues
+    # Install Python dependencies
     cd /opt
-    python3 -m pip install --user -r requirements.txt
-    python3 -m pip install --user -e .
+    pip install -r requirements.txt
+    pip install -e .
 
 %environment
     # Set runtime license path to match BABS mount point
     export FS_LICENSE=/SGLR/FREESURFER_HOME/license.txt
-    # Add opt and local Python packages to path
+    # Add opt to Python path
     export PYTHONPATH=/opt:$PYTHONPATH
-    export PATH=/root/.local/bin:$PATH
+    # Add Python packages to path
+    export PATH=/usr/local/bin:$PATH
 
 %runscript
     # Execute the Python entry point directly
