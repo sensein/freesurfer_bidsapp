@@ -16,7 +16,7 @@ from bids import BIDSLayout
 
 from src.freesurfer.wrapper import FreeSurferWrapper
 from src.nidm.fs2nidm import FreeSurferToNIDM
-from src.utils import get_freesurfer_version, setup_logging, get_version_info
+from src.utils import setup_logging, get_version_info
 
 try:
     from importlib.metadata import version
@@ -70,7 +70,7 @@ def process_participant(
 
     # Convert paths to Path objects
     bids_dir = Path(bids_dir)
-    output_dir = Path(output_dir)
+    output_dir = Path(output_dir)/ "freesurfer_bids_app"
     if freesurfer_license:
         freesurfer_license = Path(freesurfer_license)
 

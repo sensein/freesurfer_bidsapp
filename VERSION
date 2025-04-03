@@ -1,0 +1,11 @@
+{
+    "bids_freesurfer": {
+        "version": "0.1.0",
+        "source": "setup.py"
+    },
+    "freesurfer": {
+        "version": "8.0.0",
+        "source": "base_image",
+        "image": "vnmd/freesurfer_8.0.0"
+    }
+} 

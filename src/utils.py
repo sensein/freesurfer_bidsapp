@@ -13,11 +13,12 @@ import subprocess
 import sys
 from pathlib import Path
 import datetime
+import json
 
 
 def get_freesurfer_version():
     """
-    Get FreeSurfer version string from Dockerfile.
+    Get FreeSurfer version string from VERSION file.
 
     Returns
     -------
@@ -25,21 +26,15 @@ def get_freesurfer_version():
         FreeSurfer version string, or "unknown" if not available
     """
     try:
-        # Read version from Dockerfile
-        dockerfile_path = Path(__file__).parent.parent / "Dockerfile"
-        if dockerfile_path.exists():
-            with open(dockerfile_path, "r") as f:
-                for line in f:
-                    if line.startswith("FROM"):
-                        # Extract version from image name (e.g., "FROM vnmd/freesurfer_8.0.0")
-                        image = line.strip().split()[1]
-                        version_match = re.search(r"(\d+\.\d+\.\d+)", image)
-                        if version_match:
-                            return version_match.group(1)
-
+        version_path = Path(__file__).parent.parent / "VERSION"
+        if version_path.exists():
+            with open(version_path, "r") as f:
+                version_data = json.load(f)
+                if "freesurfer" in version_data and "version" in version_data["freesurfer"]:
+                    return version_data["freesurfer"]["version"]
         return "unknown"
     except Exception as e:
-        logging.warning(f"Failed to get FreeSurfer version from Dockerfile: {str(e)}")
+        logging.warning(f"Failed to get FreeSurfer version from VERSION file: {str(e)}")
         return "unknown"
 
 def setup_logging(log_level=logging.INFO, log_file=None):
@@ -189,7 +184,23 @@ def get_version_info():
         }
     }
 
-    # Get BIDS app version from setup.py
+    # Try to read version from VERSION file first
+    try:
+        version_path = Path(__file__).parent.parent / "VERSION"
+        if version_path.exists():
+            with open(version_path, "r") as f:
+                version_data = json.load(f)
+                # Update bids_freesurfer version
+                if "bids_freesurfer" in version_data:
+                    version_info["bids_freesurfer"].update(version_data["bids_freesurfer"])
+                # Update freesurfer version
+                if "freesurfer" in version_data:
+                    version_info["freesurfer"].update(version_data["freesurfer"])
+                return version_info
+    except Exception as e:
+        logging.warning(f"Failed to read VERSION file: {str(e)}")
+
+    # Fallback to reading from setup.py if VERSION file not available
     try:
         setup_path = Path(__file__).parent.parent / "setup.py"
         if setup_path.exists():
@@ -215,22 +226,6 @@ def get_version_info():
                 version_info["bids_freesurfer"]["version"] = get_distribution("bids-freesurfer").version
             except Exception:
                 pass
-
-    # Get FreeSurfer image from Dockerfile
-    try:
-        dockerfile_path = Path(__file__).parent.parent / "Dockerfile"
-        if dockerfile_path.exists():
-            with open(dockerfile_path, "r") as f:
-                for line in f:
-                    if line.startswith("FROM"):
-                        # Extract image name (e.g., "FROM vnmd/freesurfer_8.0.0")
-                        image = line.strip().split()[1]
-                        version_info["freesurfer"]["image"] = image
-                        # Extract version from image name
-                        if "_" in image:
-                            version_info["freesurfer"]["version"] = image.split("_")[-1]
-    except Exception as e:
-        logging.warning(f"Failed to read Dockerfile: {str(e)}")
 
     # Get build stamp if available (as additional information)
     fs_home = os.environ.get("FREESURFER_HOME")

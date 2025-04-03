@@ -228,66 +228,6 @@ class FreeSurferToNIDM:
             logger.warning(f"Error querying CDE graph: {str(e)}")
             return pd.DataFrame()  # Return empty DataFrame on error
 
-    def _get_fs_version(self):
-        """Get FreeSurfer version from logs or other sources."""
-        # Try to find version in recon-all.log
-        log_file = self.fs_subject_dir / "scripts" / "recon-all.log"
-        if log_file.exists():
-            try:
-                with open(log_file) as f:
-                    content = f.read()
-
-                # Look for version in log
-                match = re.search(r"freesurfer-darwin-darwin.+(\d+\.\d+\.\d+)", content)
-                if match:
-                    return match.group(1)
-
-                match = re.search(r"freesurfer-linux.+(\d+\.\d+\.\d+)", content)
-                if match:
-                    return match.group(1)
-
-                match = re.search(r"recon-all.+v(\d+\.\d+\.\d+)", content)
-                if match:
-                    return match.group(1)
-            except:
-                pass
-
-        # Try build-stamp.txt file
-        build_stamp = self.fs_subject_dir / "scripts" / "build-stamp.txt"
-        if build_stamp.exists():
-            try:
-                with open(build_stamp) as f:
-                    return f.readline().strip()
-            except:
-                pass
-
-        # Try provenance file
-        for prov_file in [
-            self.fs_subject_dir / "provenance.json",
-            self.freesurfer_dir.parent
-            / "provenance"
-            / f"sub-{self.session_label}"
-            / "provenance.json",
-        ]:
-            if prov_file.exists():
-                try:
-                    with open(prov_file) as f:
-                        data = json.load(f)
-
-                    # Check different formats
-                    if (
-                        "Configuration" in data
-                        and "FreeSurferVersion" in data["Configuration"]
-                    ):
-                        return data["Configuration"]["FreeSurferVersion"]
-
-                    if "SoftwareVersion" in data:
-                        return data["SoftwareVersion"]
-                except:
-                    pass
-
-        return None
-
     def _add_basic_provenance(self):
         """Add basic provenance information to the graph."""
         # Get version information
