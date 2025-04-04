@@ -10,12 +10,12 @@ import logging
 import sys
 from pathlib import Path
 import os
+import subprocess
 
 import click
 from bids import BIDSLayout
 
 from src.freesurfer.wrapper import FreeSurferWrapper
-from src.nidm.fs2nidm import FreeSurferToNIDM
 from src.utils import setup_logging, get_version_info
 
 try:
@@ -115,14 +115,35 @@ def process_participant(
             os.makedirs(nidm_dir, exist_ok=True)
 
             try:
-                converter = FreeSurferToNIDM(
-                    freesurfer_dir=freesurfer_dir,
-                    bids_dir=bids_dir,  # Pass BIDS directory
-                    subject_id=participant_label,  # Add sub- prefix
-                    output_dir=nidm_dir
+                # Use fs_to_nidm.py script directly
+                subject_dir = os.path.join(freesurfer_dir, participant_label)
+                output_dir = nidm_dir
+                
+                # Build the command
+                fs_to_nidm_path = os.path.join(
+                    os.path.dirname(__file__),
+                    'segstats_jsonld',
+                    'segstats_jsonld',
+                    'fs_to_nidm.py'
                 )
-                converter.convert()
-                logger.info(f"NIDM conversion complete for {participant_label}")
+                cmd = [
+                    'python3',
+                    fs_to_nidm_path,
+                    '-s', subject_dir,  # subject directory
+                    '-o', output_dir,   # output directory
+                    '-j'               # output as JSON-LD
+                ]
+                
+                # Run the command
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    logger.info(f"NIDM conversion complete for {participant_label}")
+                else:
+                    logger.error(f"NIDM conversion failed for {participant_label}")
+                    logger.error(f"Error output: {result.stderr}")
+                    if verbose:
+                        logger.error(f"Command output: {result.stdout}")
             except Exception as e:
                 logger.error(f"NIDM conversion failed for {participant_label}: {str(e)}")
                 if verbose:

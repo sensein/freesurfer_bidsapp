@@ -30,7 +30,6 @@ def test_local_imports():
     """Test that all local module imports work"""
     try:
         from src.freesurfer.wrapper import FreeSurferWrapper
-        from src.nidm.fs2nidm import FreeSurferToNIDM, convert_subject
         from src.utils import get_freesurfer_version, setup_logging
         assert True  # If we get here, imports worked
     except ImportError as e:

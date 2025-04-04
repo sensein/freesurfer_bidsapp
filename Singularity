@@ -19,8 +19,14 @@ From: vnmd/freesurfer_8.0.0
     
     # Install Python dependencies
     cd /opt
-    pip install -r requirements.txt
+    
+    # First install the submodule
+    cd src/segstats_jsonld
     pip install -e .
+    cd /opt
+    
+    # Then install the main package
+    pip install -r requirements.txt
 
 %environment
     # Set runtime license path to match BABS mount point

@@ -20,9 +20,12 @@ ENV FS_LICENSE=/SGLR/FREESURFER_HOME/license.txt
 # Copy application files to a location that won't conflict
 COPY . /opt/
 
-# Install Python dependencies
+# Install Python dependencies and submodules
 WORKDIR /opt
-RUN pip3 install --no-cache-dir -r requirements.txt && \
+RUN git submodule update --init --recursive && \
+    pip3 install --no-cache-dir -r requirements.txt && \
+    pip3 install -e . && \
+    cd src/segstats_jsonld && \
     pip3 install -e .
 
 # =======================================

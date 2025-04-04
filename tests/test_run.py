@@ -20,7 +20,7 @@ from src.run import cli
 def bids_dataset(tmp_path):
     """Create a temporary BIDS dataset for testing."""
     # Create basic BIDS structure
-    bids_dir = tmp_path / "bids_dataset"
+    bids_dir = Path(tmp_path) / "bids_dataset"
     bids_dir.mkdir(parents=True)
 
     # Create dataset_description.json
@@ -32,19 +32,19 @@ def bids_dataset(tmp_path):
         }, f)
 
     # Create subject directory
-    subject_dir = bids_dir / "sub-001"
+    subject_dir = Path(bids_dir) / "sub-001"
     subject_dir.mkdir()
 
     # Create anat directory
-    anat_dir = subject_dir / "anat"
+    anat_dir = Path(bids_dir) / "sub-001" / "anat"
     anat_dir.mkdir()
 
     # Create dummy T1w image
-    t1w_file = anat_dir / "sub-001_T1w.nii.gz"
+    t1w_file = Path(anat_dir) / "sub-001_T1w.nii.gz"
     t1w_file.touch()
 
     # Create dummy T2w image
-    t2w_file = anat_dir / "sub-001_T2w.nii.gz"
+    t2w_file = Path(anat_dir) / "sub-001_T2w.nii.gz"
     t2w_file.touch()
 
     return bids_dir
@@ -53,7 +53,7 @@ def bids_dataset(tmp_path):
 @pytest.fixture
 def freesurfer_license(tmp_path):
     """Create a dummy FreeSurfer license file."""
-    license_file = tmp_path / "license.txt"
+    license_file = Path(tmp_path) / "license.txt"
     license_file.write_text("dummy license")
     return license_file
 
@@ -61,7 +61,7 @@ def freesurfer_license(tmp_path):
 @pytest.fixture
 def output_dir(tmp_path):
     """Create a temporary output directory."""
-    output_dir = tmp_path / "output"
+    output_dir = Path(tmp_path) / "output"
     output_dir.mkdir()
     return output_dir
 
@@ -104,10 +104,14 @@ def mock_wrapper():
 
 @pytest.fixture
 def mock_nidm():
-    """Mock for FreeSurferToNIDM."""
-    with patch("src.nidm.fs2nidm.FreeSurferToNIDM") as mock:
-        nidm_instance = MagicMock()
-        mock.return_value = nidm_instance
+    """Mock for fs_to_nidm.py subprocess call."""
+    with patch("subprocess.run") as mock:
+        # Mock successful subprocess run
+        mock.return_value = MagicMock(
+            returncode=0,
+            stdout="NIDM conversion successful",
+            stderr=""
+        )
         yield mock
 
 
@@ -120,8 +124,14 @@ def mock_fs_version():
 
 
 @patch('src.run.BIDSLayout')
-def test_basic_run(mock_layout, bids_dataset, output_dir, freesurfer_license,
-                  mock_wrapper, mock_nidm, mock_fs_version):
+@patch('src.run.FreeSurferWrapper')
+@patch('subprocess.run')
+@patch.dict('os.environ', {
+    'FREESURFER_HOME': '/dummy/path',
+    'SUBJECTS_DIR': '/dummy/subjects'
+})
+def test_basic_run(mock_subprocess_run, mock_wrapper_class, mock_layout, bids_dataset, output_dir, freesurfer_license,
+                  mock_fs_version):
     """Test basic run with default options."""
     # Set up mock returns
     mock_layout_instance = MagicMock()
@@ -131,9 +141,17 @@ def test_basic_run(mock_layout, bids_dataset, output_dir, freesurfer_license,
     mock_layout_instance.get_sessions.return_value = []
     mock_layout.return_value = mock_layout_instance
 
+    # Set up FreeSurferWrapper mock
+    mock_wrapper_instance = MagicMock()
+    mock_wrapper_instance.process_subject.return_value = True
+    mock_wrapper_class.return_value = mock_wrapper_instance
+
+    # Set up subprocess.run mock
+    mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
     # Create proper BIDS dataset structure
-    subject_dir = bids_dataset / "sub-001"
-    anat_dir = subject_dir / "anat"
+    subject_dir = Path(bids_dataset) / "sub-001"
+    anat_dir = Path(subject_dir) / "anat"
     anat_dir.mkdir(parents=True, exist_ok=True)
     (anat_dir / "sub-001_T1w.nii.gz").touch()
 
@@ -143,40 +161,48 @@ def test_basic_run(mock_layout, bids_dataset, output_dir, freesurfer_license,
         "BIDSVersion": "1.8.0",
         "DatasetType": "raw"
     }
-    with open(bids_dataset / "dataset_description.json", "w") as f:
+    with open(Path(bids_dataset) / "dataset_description.json", "w") as f:
         json.dump(dataset_description, f)
 
     # Run the test
     runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            str(bids_dataset),
-            str(output_dir),
-            "--participant_label", "sub-001",
-            "--freesurfer_license", str(freesurfer_license),
-            "--skip-bids-validation"
-        ],
-        catch_exceptions=False
-    )
+    result = runner.invoke(cli, [
+        str(bids_dataset),
+        str(output_dir),
+        '--participant_label', 'sub-001',
+        '--freesurfer_license', str(freesurfer_license),
+        '--skip-bids-validation'
+    ], catch_exceptions=False)
 
     # Debug output
     print(f"\nExit code: {result.exit_code}")
+    print(f"Output: {result.output}")
     if result.exception:
         print(f"Exception: {result.exception}")
-    print(f"Output: {result.output}")
 
+    # Verify the result
     assert result.exit_code == 0
-    mock_layout.assert_called_once()
+
+    # Verify FreeSurfer processing was called
+    mock_wrapper_instance.process_subject.assert_called_once()
+
+    # Verify NIDM conversion was called with correct arguments
+    mock_subprocess_run.assert_called_once()
+    call_args = mock_subprocess_run.call_args[0][0]
+    assert call_args[0] == 'python3'
+    assert call_args[1].endswith('fs_to_nidm.py')
+    assert call_args[2] == '-s'
+    assert call_args[4] == '-o'
+    assert call_args[6] == '-j'
 
 
 def test_custom_freesurfer_dir(bids_dataset, output_dir, freesurfer_license):
     """Test run with custom FreeSurfer directory."""
-    custom_fs_dir = output_dir / "custom_fs"
+    custom_fs_dir = Path(output_dir) / "custom_fs"
     custom_fs_dir.mkdir()
 
     # Create proper BIDS dataset structure first
-    subject_dir = bids_dataset / "sub-001"
+    subject_dir = Path(bids_dataset) / "sub-001"
     anat_dir = subject_dir / "anat"
     anat_dir.mkdir(parents=True, exist_ok=True)
     
@@ -189,12 +215,12 @@ def test_custom_freesurfer_dir(bids_dataset, output_dir, freesurfer_license):
         "BIDSVersion": "1.8.0",
         "DatasetType": "raw"
     }
-    with open(bids_dataset / "dataset_description.json", "w") as f:
+    with open(Path(bids_dataset) / "dataset_description.json", "w") as f:
         json.dump(dataset_description, f)
 
     with patch("src.run.BIDSLayout") as mock_layout, \
          patch("src.freesurfer.wrapper.FreeSurferWrapper") as mock_wrapper, \
-         patch("src.nidm.fs2nidm.FreeSurferToNIDM") as mock_nidm, \
+         patch("subprocess.run") as mock_nidm, \
          patch("src.utils.get_freesurfer_version") as mock_fs_version, \
          patch("os.environ", {"FREESURFER_HOME": "/dummy/path"}):
 
@@ -234,7 +260,7 @@ def test_custom_freesurfer_dir(bids_dataset, output_dir, freesurfer_license):
 def test_skip_nidm(bids_dataset, output_dir, freesurfer_license):
     """Test that NIDM conversion is skipped when requested."""
     # Create proper BIDS dataset structure
-    subject_dir = bids_dataset / "sub-001"
+    subject_dir = Path(bids_dataset) / "sub-001"
     anat_dir = subject_dir / "anat"
     anat_dir.mkdir(parents=True, exist_ok=True)
     (anat_dir / "sub-001_T1w.nii.gz").touch()
@@ -245,13 +271,13 @@ def test_skip_nidm(bids_dataset, output_dir, freesurfer_license):
         "BIDSVersion": "1.8.0",
         "DatasetType": "raw"
     }
-    with open(bids_dataset / "dataset_description.json", "w") as f:
+    with open(Path(bids_dataset) / "dataset_description.json", "w") as f:
         json.dump(dataset_description, f)
 
     # Change the patch location to where it's imported in run.py
     with patch('src.run.FreeSurferWrapper') as mock_wrapper, \
          patch('src.run.BIDSLayout') as mock_layout, \
-         patch('src.run.FreeSurferToNIDM') as mock_nidm, \
+         patch('subprocess.run') as mock_nidm, \
          patch('src.utils.get_freesurfer_version') as mock_fs_version, \
          patch("os.environ", {"FREESURFER_HOME": "/dummy/path"}):
 
@@ -295,7 +321,7 @@ def test_skip_nidm(bids_dataset, output_dir, freesurfer_license):
 def test_error_handling(bids_dataset, output_dir, freesurfer_license):
     """Test error handling when processing fails."""
     # Create proper BIDS dataset structure
-    subject_dir = bids_dataset / "sub-001"
+    subject_dir = Path(bids_dataset) / "sub-001"
     anat_dir = subject_dir / "anat"
     anat_dir.mkdir(parents=True, exist_ok=True)
     (anat_dir / "sub-001_T1w.nii.gz").touch()
@@ -306,12 +332,12 @@ def test_error_handling(bids_dataset, output_dir, freesurfer_license):
         "BIDSVersion": "1.8.0",
         "DatasetType": "raw"
     }
-    with open(bids_dataset / "dataset_description.json", "w") as f:
+    with open(Path(bids_dataset) / "dataset_description.json", "w") as f:
         json.dump(dataset_description, f)
 
     with patch('src.run.BIDSLayout') as mock_layout, \
          patch('src.run.FreeSurferWrapper') as mock_wrapper, \
-         patch('src.run.FreeSurferToNIDM') as mock_nidm, \
+         patch('subprocess.run') as mock_nidm, \
          patch('src.run.get_version_info') as mock_version_info, \
          patch("os.environ", {"FREESURFER_HOME": "/dummy/path"}):
 
@@ -359,7 +385,7 @@ def test_error_handling(bids_dataset, output_dir, freesurfer_license):
 def test_verbose_output(bids_dataset, output_dir, freesurfer_license):
     """Test verbose output mode."""
     # Create proper BIDS dataset structure
-    subject_dir = bids_dataset / "sub-001"
+    subject_dir = Path(bids_dataset) / "sub-001"
     anat_dir = subject_dir / "anat"
     anat_dir.mkdir(parents=True, exist_ok=True)
     (anat_dir / "sub-001_T1w.nii.gz").touch()
@@ -370,12 +396,12 @@ def test_verbose_output(bids_dataset, output_dir, freesurfer_license):
         "BIDSVersion": "1.8.0",
         "DatasetType": "raw"
     }
-    with open(bids_dataset / "dataset_description.json", "w") as f:
+    with open(Path(bids_dataset) / "dataset_description.json", "w") as f:
         json.dump(dataset_description, f)
 
     with patch("src.run.BIDSLayout") as mock_layout, \
          patch("src.run.FreeSurferWrapper") as mock_wrapper, \
-         patch("src.run.FreeSurferToNIDM") as mock_nidm, \
+         patch("subprocess.run") as mock_nidm, \
          patch("src.run.get_version_info") as mock_version_info, \
          patch("os.environ", {"FREESURFER_HOME": "/dummy/path"}), \
          patch("src.run.setup_logging") as mock_setup_logging:
@@ -432,7 +458,7 @@ def test_verbose_output(bids_dataset, output_dir, freesurfer_license):
 def test_processing_summary(bids_dataset, output_dir, freesurfer_license):
     """Test generation of processing summary."""
     # Create proper BIDS dataset structure
-    subject_dir = bids_dataset / "sub-001"
+    subject_dir = Path(bids_dataset) / "sub-001"
     anat_dir = subject_dir / "anat"
     anat_dir.mkdir(parents=True, exist_ok=True)
     (anat_dir / "sub-001_T1w.nii.gz").touch()
@@ -443,12 +469,12 @@ def test_processing_summary(bids_dataset, output_dir, freesurfer_license):
         "BIDSVersion": "1.8.0",
         "DatasetType": "raw"
     }
-    with open(bids_dataset / "dataset_description.json", "w") as f:
+    with open(Path(bids_dataset) / "dataset_description.json", "w") as f:
         json.dump(dataset_description, f)
 
     with patch("src.run.BIDSLayout") as mock_layout, \
          patch("src.run.FreeSurferWrapper") as mock_wrapper, \
-         patch("src.run.FreeSurferToNIDM") as mock_nidm, \
+         patch("subprocess.run") as mock_nidm, \
          patch("src.run.get_version_info") as mock_version_info, \
          patch("os.environ", {"FREESURFER_HOME": "/dummy/path"}):
 

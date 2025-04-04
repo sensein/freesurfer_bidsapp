@@ -90,6 +90,10 @@ if len(sys.argv) > 1 and sys.argv[1] in ["docker", "singularity", "containers"]:
     if len(sys.argv) == 1:
         sys.exit(0)
 
+# Initialize and update submodules
+print("Initializing git submodules...")
+subprocess.run(["git", "submodule", "update", "--init", "--recursive"], check=True)
+
 setup(
     name="bids-freesurfer",
     version="0.1.0",
@@ -112,7 +116,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "bids-freesurfer=src.run:main",
+            "bids-freesurfer=src.run:cli",
         ],
     },
     install_requires=[
@@ -126,6 +130,7 @@ setup(
         "rdflib>=6.0.0",
         "rapidfuzz>=2.0.0",
         "PyLD>=2.0.0",
+        "nidm",
     ],
     python_requires=">=3.9",
 )
