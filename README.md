@@ -42,10 +42,10 @@ You can build the container images using these commands:
 python setup.py docker
 
 # Build Singularity/Apptainer image on clusters
-apptainer build --fakeroot freesurfer_bids_app.sif Singularity
+apptainer build --fakeroot freesurfer_bidsapp.sif Singularity
 
 # Or build in a custom location
-apptainer build --fakeroot /path/to/output/freesurfer_bids_app.sif Singularity
+apptainer build --fakeroot /path/to/output/freesurfer_bidsapp.sif Singularity
 ```
 
 Note: For cluster environments, we use the `--fakeroot` option with Apptainer as it:

@@ -169,6 +169,7 @@ def test_basic_run(mock_subprocess_run, mock_wrapper_class, mock_layout, bids_da
     result = runner.invoke(cli, [
         str(bids_dataset),
         str(output_dir),
+        'participant',
         '--participant_label', 'sub-001',
         '--freesurfer_license', str(freesurfer_license),
         '--skip-bids-validation'
@@ -240,6 +241,7 @@ def test_custom_freesurfer_dir(bids_dataset, output_dir, freesurfer_license):
             [
                 str(bids_dataset),
                 str(output_dir),
+                'participant',
                 "--participant_label", "sub-001",
                 "--freesurfer_license", str(freesurfer_license),
                 "--skip-bids-validation"
@@ -305,6 +307,7 @@ def test_skip_nidm(bids_dataset, output_dir, freesurfer_license):
             [
                 str(bids_dataset),
                 str(output_dir),
+                'participant',
                 "--participant_label", "sub-001",
                 "--freesurfer_license", str(freesurfer_license),
                 "--skip-bids-validation",
@@ -365,6 +368,7 @@ def test_error_handling(bids_dataset, output_dir, freesurfer_license):
             [
                 str(bids_dataset),
                 str(output_dir),
+                'participant',
                 "--participant_label", "sub-001",
                 "--freesurfer_license", str(freesurfer_license),
                 "--skip-bids-validation"
@@ -436,7 +440,8 @@ def test_verbose_output(bids_dataset, output_dir, freesurfer_license):
             [
                 str(bids_dataset),
                 str(output_dir),
-                "--participant_label", "sub-001",  # Changed to include sub- prefix
+                'participant',
+                "--participant_label", "sub-001",
                 "--freesurfer_license", str(freesurfer_license),
                 "--skip-bids-validation",
                 "--verbose"
@@ -509,7 +514,8 @@ def test_processing_summary(bids_dataset, output_dir, freesurfer_license):
             [
                 str(bids_dataset),
                 str(output_dir),
-                "--participant_label", "sub-001",  # Changed to include sub- prefix
+                'participant',
+                "--participant_label", "sub-001",
                 "--freesurfer_license", str(freesurfer_license),
                 "--skip-bids-validation"
             ],
@@ -546,6 +552,7 @@ def test_invalid_subject(bids_dataset, output_dir, freesurfer_license):
             [
                 str(bids_dataset),
                 str(output_dir),
+                'participant',
                 "--participant_label", "sub-999",  # Add sub- prefix
                 "--freesurfer_license", str(freesurfer_license),
                 "--skip-bids-validation"

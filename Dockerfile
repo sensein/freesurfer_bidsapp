@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-setuptools \
     git \
+    build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # =======================================

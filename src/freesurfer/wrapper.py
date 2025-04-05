@@ -90,7 +90,7 @@ class FreeSurferWrapper:
                 logger.error("FreeSurfer license not found in standard locations")
                 raise FileNotFoundError("FreeSurfer license not found. Please specify with --freesurfer_license")
 
-    def _create_recon_all_command(self, subject_id, t1w_images, t2w_images=None):
+    def _create_recon_all_command(self, subject_id, t1w_images, t2w_images=None, session_label=None):
         """
         Create FreeSurfer recon-all command.
 
@@ -102,13 +102,21 @@ class FreeSurferWrapper:
             List of T1w image paths
         t2w_images : list, optional
             List of T2w image paths
+        session_label : str, optional
+            Session label (if processing a specific session)
 
         Returns
         -------
         list
             Command list for subprocess
         """
-        cmd = ["recon-all", "-subjid", subject_id]
+        # If processing a session, modify the subject ID
+        if session_label:
+            fs_subject_id = f"{subject_id}_ses-{session_label}"
+        else:
+            fs_subject_id = subject_id
+            
+        cmd = ["recon-all", "-subjid", fs_subject_id]
 
         # Add T1w images
         for t1w in t1w_images:
@@ -121,7 +129,7 @@ class FreeSurferWrapper:
         cmd.append("-all")
         return cmd
 
-    def process_subject(self, subject_id, layout=None):
+    def process_subject(self, subject_id, layout=None, session_label=None):
         """
         Process a single subject with FreeSurfer.
 
@@ -131,13 +139,16 @@ class FreeSurferWrapper:
             Subject ID (including 'sub-' prefix, e.g., 'sub-001')
         layout : BIDSLayout, optional
             BIDS layout object (if not provided, one will be created)
+        session_label : str, optional
+            Session label (if processing a specific session)
 
         Returns
         -------
         bool
             True if processing was successful, False otherwise
         """
-        logger.info(f"Processing {subject_id}")
+        logger.info(f"Processing {subject_id}" + 
+                   (f" session {session_label}" if session_label else ""))
 
         try:
             if layout is None:
@@ -149,50 +160,96 @@ class FreeSurferWrapper:
             
             bids_subject = subject_id[4:]  # Always strip 'sub-' for BIDS queries
 
+            # Determine session for queries
+            bids_session = None
+            if session_label:
+                if session_label.startswith("ses-"):
+                    bids_session = session_label[4:]  # Strip 'ses-' for BIDS queries
+                else:
+                    bids_session = session_label
+
             # Find T1w and T2w images
-            t1w_images = self._find_images(layout, bids_subject, "T1w")
+            t1w_images = self._find_images(layout, bids_subject, "T1w", bids_session)
             if not t1w_images:
-                logger.error(f"No T1w images found for {subject_id}")
-                self.results["skipped"].append(subject_id)
+                logger.error(f"No T1w images found for {subject_id}" + 
+                           (f" session {session_label}" if session_label else ""))
+                self.results["skipped"].append(f"{subject_id}" + 
+                                             (f"_ses-{bids_session}" if bids_session else ""))
                 return False
 
-            t2w_images = self._find_images(layout, bids_subject, "T2w")
+            t2w_images = self._find_images(layout, bids_subject, "T2w", bids_session)
             if t2w_images:
-                logger.info(f"Found {len(t2w_images)} T2w images for {subject_id}")
+                logger.info(f"Found {len(t2w_images)} T2w images for {subject_id}" + 
+                           (f" session {session_label}" if session_label else ""))
+
+            # Determine the FreeSurfer subject ID
+            fs_subject_id = subject_id
+            if session_label:
+                if session_label.startswith("ses-"):
+                    fs_subject_id = f"{subject_id}_{session_label}"
+                else:
+                    fs_subject_id = f"{subject_id}_ses-{session_label}"
 
             # Check if subject already processed
-            if (self.freesurfer_dir / subject_id / "scripts" / "recon-all.done").exists():
-                logger.info(f"{subject_id} already processed. Skipping...")
-                self.results["skipped"].append(subject_id)
+            if (self.freesurfer_dir / fs_subject_id / "scripts" / "recon-all.done").exists():
+                logger.info(f"{fs_subject_id} already processed. Skipping...")
+                self.results["skipped"].append(fs_subject_id)
                 return True
 
             # Run recon-all
-            cmd = self._create_recon_all_command(subject_id, t1w_images, t2w_images)
+            cmd = self._create_recon_all_command(subject_id, t1w_images, t2w_images, 
+                                                bids_session if session_label else None)
             logger.info(f"Running command: {' '.join(cmd)}")
             
             subprocess.run(cmd, check=True, capture_output=True, text=True)
 
             # Organize outputs
-            self._organize_bids_output(subject_id)
+            self._organize_bids_output(subject_id, bids_session if session_label else None)
 
-            self.results["success"].append(subject_id)
-            logger.info(f"Successfully processed {subject_id}")
+            self.results["success"].append(fs_subject_id)
+            logger.info(f"Successfully processed {fs_subject_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Error processing {subject_id}: {str(e)}")
-            self.results["failure"].append(subject_id)
+            logger.error(f"Error processing {subject_id}" + 
+                        (f" session {session_label}" if session_label else "") + 
+                        f": {str(e)}")
+            self.results["failure"].append(f"{subject_id}" + 
+                                         (f"_ses-{bids_session}" if bids_session else ""))
             return False
 
-    def _find_images(self, layout, subject_id, suffix):
-        """Find images for a subject with given suffix."""
-        return layout.get(
-            return_type="file",
-            subject=subject_id,
-            datatype="anat",
-            suffix=suffix,
-            extension=[".nii", ".nii.gz"]
-        )
+    def _find_images(self, layout, subject_id, suffix, session_id=None):
+        """
+        Find images for a subject with given suffix.
+        
+        Parameters
+        ----------
+        layout : BIDSLayout
+            BIDS layout object
+        subject_id : str
+            Subject ID (without 'sub-' prefix)
+        suffix : str
+            Image suffix (e.g., 'T1w', 'T2w')
+        session_id : str, optional
+            Session ID (without 'ses-' prefix)
+            
+        Returns
+        -------
+        list
+            List of image paths
+        """
+        query = {
+            "return_type": "file",
+            "subject": subject_id,
+            "datatype": "anat",
+            "suffix": suffix,
+            "extension": [".nii", ".nii.gz"]
+        }
+        
+        if session_id:
+            query["session"] = session_id
+            
+        return layout.get(**query)
 
     def _copy_file(self, src, dest):
         """Copy file if it exists."""
@@ -223,8 +280,13 @@ class FreeSurferWrapper:
         anat_dir.mkdir(parents=True, exist_ok=True)
         stats_dir.mkdir(parents=True, exist_ok=True)
 
+        # Determine FreeSurfer subject directory name
+        fs_subject_id = subject_id
+        if session_label:
+            fs_subject_id = f"{subject_id}_ses-{session_label}"
+            
         # Check FreeSurfer subject directory
-        fs_subject_dir = self.freesurfer_dir / subject_id
+        fs_subject_dir = self.freesurfer_dir / fs_subject_id
         if not fs_subject_dir.exists():
             logger.error(f"FreeSurfer subject directory not found: {fs_subject_dir}")
             return
