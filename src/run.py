@@ -60,17 +60,19 @@ def process_participant(
         skip_nidm (bool): Skip NIDM export
         verbose (bool): Enable verbose output
     """
-    freesurfer_dir = os.path.join(output_dir, "freesurfer")
-    nidm_dir = os.path.join(output_dir, "nidm")
+    # Convert paths to Path objects
+    bids_dir = Path(bids_dir)
+    
+    # First create the main output directory
+    app_output_dir = Path(output_dir) / "freesurfer_bidsapp"
+    freesurfer_dir = app_output_dir / "freesurfer"
+    nidm_dir = app_output_dir / "nidm"
 
     # Set logging level and print version info
     setup_logging(logging.DEBUG if verbose else logging.INFO)
     version_info = get_version_info()
     _log_version_info(version_info)
 
-    # Convert paths to Path objects
-    bids_dir = Path(bids_dir)
-    output_dir = Path(output_dir)/ "freesurfer_bids_app"
     if freesurfer_license:
         freesurfer_license = Path(freesurfer_license)
 
@@ -93,7 +95,7 @@ def process_participant(
     try:
         freesurfer_wrapper = FreeSurferWrapper(
             bids_dir,
-            output_dir,
+            app_output_dir,  # Pass the app_output_dir to FreeSurferWrapper
             freesurfer_license,
         )
     except Exception as e:
@@ -117,7 +119,6 @@ def process_participant(
             try:
                 # Use fs_to_nidm.py script directly
                 subject_dir = os.path.join(freesurfer_dir, participant_label)
-                output_dir = nidm_dir
                 
                 # Build the command
                 fs_to_nidm_path = os.path.join(
@@ -130,7 +131,7 @@ def process_participant(
                     'python3',
                     fs_to_nidm_path,
                     '-s', subject_dir,  # subject directory
-                    '-o', output_dir,   # output directory
+                    '-o', nidm_dir,   # output directory
                     '-j'               # output as JSON-LD
                 ]
                 
@@ -189,23 +190,25 @@ def process_session(
         skip_nidm (bool): Skip NIDM export
         verbose (bool): Enable verbose output
     """
-    freesurfer_dir = os.path.join(output_dir, "freesurfer")
-    nidm_dir = os.path.join(output_dir, "nidm")
+    # Convert paths to Path objects
+    bids_dir = Path(bids_dir)
+    
+    # First create the main output directory
+    app_output_dir = Path(output_dir) / "freesurfer_bidsapp"
+    freesurfer_dir = app_output_dir / "freesurfer"
+    nidm_dir = app_output_dir / "nidm"
 
     # Set logging level and print version info
     setup_logging(logging.DEBUG if verbose else logging.INFO)
     version_info = get_version_info()
     _log_version_info(version_info)
 
-    # Convert paths to Path objects
-    bids_dir = Path(bids_dir)
-    output_dir = Path(output_dir)/ "freesurfer_bids_app"
     if freesurfer_license:
         freesurfer_license = Path(freesurfer_license)
 
     # Set FreeSurfer environment variables
     os.environ['FS_ALLOW_DEEP'] = '1'  # Enable ML routines
-    os.environ['SUBJECTS_DIR'] = freesurfer_dir
+    os.environ['SUBJECTS_DIR'] = str(freesurfer_dir)
 
     # Create FreeSurfer output directory
     os.makedirs(freesurfer_dir, exist_ok=True)
@@ -222,7 +225,7 @@ def process_session(
     try:
         freesurfer_wrapper = FreeSurferWrapper(
             bids_dir,
-            output_dir,
+            app_output_dir,  # Pass the app_output_dir to FreeSurferWrapper
             freesurfer_license,
         )
     except Exception as e:
@@ -255,7 +258,6 @@ def process_session(
                 # Determine subject directory with session info
                 fs_subject_id = f"{participant_label}_ses-{bids_session}"
                 subject_dir = os.path.join(freesurfer_dir, fs_subject_id)
-                output_dir = nidm_dir
                 
                 fs_to_nidm_path = os.path.join(
                     os.path.dirname(__file__),
@@ -267,7 +269,7 @@ def process_session(
                     'python3',
                     fs_to_nidm_path,
                     '-s', subject_dir,
-                    '-o', output_dir,
+                    '-o', nidm_dir,
                     '-j'
                 ]
                 
