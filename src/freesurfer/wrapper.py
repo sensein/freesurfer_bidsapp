@@ -19,7 +19,7 @@ from pathlib import Path
 import time
 
 from bids import BIDSLayout
-from src.utils import get_freesurfer_version
+from src.utils import get_freesurfer_version, get_version_info
 
 # Configure logging
 logger = logging.getLogger("bids-freesurfer.wrapper")
@@ -317,16 +317,32 @@ class FreeSurferWrapper:
         """Create dataset_description.json if it doesn't exist."""
         desc_file = self.output_dir / "dataset_description.json"
         if not desc_file.exists():
+            # Get version information from utils
+            version_info = get_version_info()
+            
+            # Get BIDS version from pybids
+            try:
+                from bids import __version__ as bids_version
+            except ImportError:
+                bids_version = "1.4.0"  # Fallback to default if pybids not available
+                
             with open(desc_file, "w") as f:
                 json.dump({
                     "Name": "FreeSurfer Derivatives",
-                    "BIDSVersion": "1.4.0",
+                    "BIDSVersion": bids_version,
                     "DatasetType": "derivative",
-                    "GeneratedBy": [{
-                        "Name": "FreeSurfer",
-                        "Version": get_freesurfer_version(),
-                        "Description": "FreeSurfer cortical reconstruction and parcellation"
-                    }]
+                    "GeneratedBy": [
+                        {
+                            "Name": "FreeSurfer",
+                            "Version": version_info.get("freesurfer", {}).get("version", get_freesurfer_version()),
+                            "Description": "FreeSurfer cortical reconstruction and parcellation"
+                        },
+                        {
+                            "Name": "bids-freesurfer",
+                            "Version": version_info.get("bids_freesurfer", {}).get("version", "unknown"),
+                            "Description": "BIDS App for FreeSurfer with NIDM Output"
+                        }
+                    ]
                 }, f, indent=2)
 
     def _create_readme(self):

@@ -8,13 +8,16 @@ RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # =======================================
 # Environment Configuration
 # =======================================
 # Make license path match BABS mount point
 ENV FS_LICENSE=/SGLR/FREESURFER_HOME/license.txt
+ENV PYTHONPATH=/opt:$PYTHONPATH
+ENV PATH=/usr/local/bin:$PATH
 
 # =======================================
 # BIDS App Setup
@@ -24,11 +27,12 @@ COPY . /opt/
 
 # Install Python dependencies and submodules
 WORKDIR /opt
-RUN git submodule update --init --recursive && \
-    pip3 install --no-cache-dir -r requirements.txt && \
-    pip3 install -e . && \
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
     cd src/segstats_jsonld && \
-    pip3 install -e .
+    python3 -m pip install -e . && \
+    cd /opt && \
+    python3 -m pip install -r requirements.txt && \
+    python3 -m pip install -e .
 
 # =======================================
 # Runtime Configuration

@@ -93,21 +93,8 @@ install_requires = [
     "nibabel>=5.0.0",
     "numpy>=1.20.0",
     "pandas>=1.3.0",
-    "prov>=2.0.0",
-    "rdflib==6.3.2",
-    "rapidfuzz>=2.0.0",
     "pytest>=7.0.0",
-    "xlrd>=2.0.0",
-    "neurdflib>=0.1.0",
 ]
-
-# These dependencies will be installed with --no-deps to avoid conflicts
-extras_require = {
-    "conflicting": [
-        "PyLD==2.0.4",  # This conflicts with pynidm's requirement of pyld<2.0
-        "pynidm==4.1.0",  # This requires pyld<2.0
-    ],
-}
 
 # Check if we're being called with a container build command
 if len(sys.argv) > 1 and sys.argv[1] in ["docker", "singularity", "containers"]:
@@ -138,12 +125,12 @@ setup(
     name="bids-freesurfer",
     version="0.1.0",
     description="BIDS App for FreeSurfer with NIDM Output",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="ReproNim",
+    author_email="repronim@gmail.com",
     packages=find_packages(),
     include_package_data=True,
     license="MIT",
-    url="https://github.com/yourusername/bids-freesurfer",
+    url="https://github.com/ReproNim/bids-freesurfer",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
@@ -161,5 +148,4 @@ setup(
     },
     python_requires=">=3.9",
     install_requires=install_requires,
-    extras_require=extras_require,
 )
