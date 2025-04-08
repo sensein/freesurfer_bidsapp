@@ -1,4 +1,6 @@
 setup_repo.py
+tests/data/
+*.bak/
 # Python
 __pycache__/
 *.py[cod]

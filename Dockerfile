@@ -6,29 +6,36 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-setuptools \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    build-essential \
+    python3-dev \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # =======================================
 # Environment Configuration
 # =======================================
-# Set runtime license path (for mounted license)
-ENV FS_LICENSE=/license.txt
+# Make license path match BABS mount point
+ENV FS_LICENSE=/SGLR/FREESURFER_HOME/license.txt
+ENV PYTHONPATH=/opt:$PYTHONPATH
+ENV PATH=/usr/local/bin:$PATH
 
 # =======================================
 # BIDS App Setup
 # =======================================
-WORKDIR /app
+# Copy application files to a location that won't conflict
+COPY . /opt/
 
-# Copy application files
-COPY . /app/
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt && \
-    pip3 install -e .
+# Install Python dependencies and submodules
+WORKDIR /opt
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    cd src/segstats_jsonld && \
+    python3 -m pip install -e . && \
+    cd /opt && \
+    python3 -m pip install -r requirements.txt && \
+    python3 -m pip install -e .
 
 # =======================================
 # Runtime Configuration
 # =======================================
-# Default command shows help
-ENTRYPOINT ["python3", "/app/src/run.py"]
-CMD ["--help"]
+# Entrypoint that expects input/output paths as arguments
+ENTRYPOINT ["python3", "/opt/src/run.py"]

@@ -6,494 +6,346 @@ This BIDS App runs FreeSurfer's recon-all pipeline on T1w and optionally T2w ima
 from a BIDS dataset and outputs both standard FreeSurfer results and NIDM format results.
 """
 
-import datetime
-import json
 import logging
-
-# Standard library imports
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-# Third-party libraries
 import click
-import numpy as np
-import rdflib
-from rdflib import Graph, Literal, Namespace, URIRef
-from rdflib.namespace import RDF, RDFS, XSD
 
 from bids import BIDSLayout
-from src.bids.provenance import BIDSProvenance, create_bids_provenance
-
-# Local modules
 from src.freesurfer.wrapper import FreeSurferWrapper
-from src.nidm.fs2nidm import FreeSurferToNIDM, convert_subject, create_group_nidm
-from src.utils import get_freesurfer_version, setup_logging
+from src.utils import get_version_info, setup_logging
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+try:
+    from importlib.metadata import version
+
+    __version__ = version("bids-freesurfer")
+except ImportError:
+    __version__ = "0.1.0"
+
 logger = logging.getLogger("bids-freesurfer")
 
 
+def _log_version_info(version_info):
+    """Log version information."""
+    logger.info(f"BIDS-FreeSurfer version: {version_info['bids_freesurfer']['version']}")
+    logger.info(f"FreeSurfer version: {version_info['freesurfer']['version']}")
+    if version_info["freesurfer"]["build_stamp"]:
+        logger.info(f"FreeSurfer build stamp: {version_info['freesurfer']['build_stamp']}")
+    logger.info(f"Python version: {version_info['python']['version']}")
+    if version_info["python"]["packages"]:
+        logger.info("Python package versions:")
+        for package, version in version_info["python"]["packages"].items():
+            logger.info(f"  {package}: {version}")
+
+
+def initialize(bids_dir, freesurfer_license, output_dir, skip_bids_validation, verbose):
+    """Initialize the BIDS-FreeSurfer app.
+    Args:
+        bids_dir (str): Path to BIDS root directory
+        freesurfer_license (str): Path to FreeSurfer license file
+        output_dir (str): Path to output directory
+        skip_bids_validation (bool): Skip BIDS validation
+        verbose (bool): Enable verbose output
+    """
+    # Convert paths to Path objects
+    bids_dir = Path(bids_dir)
+
+    # First create the main output directory
+    app_output_dir = Path(output_dir) / "freesurfer_bidsapp"
+    freesurfer_dir = app_output_dir / "freesurfer"
+    nidm_dir = app_output_dir / "nidm"
+
+    # Set logging level and print version info
+    setup_logging(logging.DEBUG if verbose else logging.INFO)
+    version_info = get_version_info()
+    _log_version_info(version_info)
+
+    if freesurfer_license:
+        freesurfer_license = Path(freesurfer_license)
+
+    # Set FreeSurfer environment variables
+    os.environ["FS_ALLOW_DEEP"] = "1"  # Enable ML routines
+    os.environ["SUBJECTS_DIR"] = str(freesurfer_dir)
+
+    # Create FreeSurfer output directory
+    os.makedirs(freesurfer_dir, exist_ok=True)
+
+    # Load BIDS dataset
+    try:
+        layout = BIDSLayout(str(bids_dir), validate=not skip_bids_validation)
+        logger.info("Found BIDS dataset")
+    except Exception as e:
+        logger.error(f"Error loading BIDS dataset: {str(e)}")
+        sys.exit(1)
+
+    # Let the FreeSurfer wrapper handle its directory
+    try:
+        freesurfer_wrapper = FreeSurferWrapper(
+            bids_dir,
+            app_output_dir,  # Pass the app_output_dir to FreeSurferWrapper
+            freesurfer_license,
+        )
+    except Exception as e:
+        logger.error(f"Error initializing FreeSurfer wrapper: {str(e)}")
+        sys.exit(1)
+
+    return layout, freesurfer_wrapper, freesurfer_dir, nidm_dir, version_info
+
+
+def nidm_conversion(nidm_dir, freesurfer_dir, participant_label, bids_session=None, verbose=False):
+    """Convert FreeSurfer outputs to NIDM format.
+    Args:
+        nidm_dir (str): Path to NIDM output directory
+        freesurfer_dir (str): Path to FreeSurfer output directory
+        participant_label (str): Participant label (without "sub-" prefix)
+        bids_session (str): Session label (without "ses-" prefix)
+        verbose (bool): Enable verbose output
+    """
+    # Determine subject directory with session info
+    if bids_session is None:
+        fs_subject_id = participant_label
+    else:
+        fs_subject_id = f"{participant_label}_ses-{bids_session}"
+    subject_dir = os.path.join(freesurfer_dir, fs_subject_id)
+
+    os.makedirs(nidm_dir, exist_ok=True)
+
+    # Build the command
+    fs_to_nidm_path = os.path.join(os.path.dirname(__file__), "segstats_jsonld", "segstats_jsonld", "fs_to_nidm.py")
+    cmd = [
+        "python3",
+        fs_to_nidm_path,
+        "-s",
+        subject_dir,  # subject directory
+        "-o",
+        nidm_dir,  # output directory
+        "-j",  # output as JSON-LD
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        logger.info("================================")
+        logger.info(f"NIDM conversion complete for {fs_subject_id}")
+        logger.info("================================")
+    else:
+        logger.error(f"NIDM conversion failed for {fs_subject_id}")
+        logger.error(f"Error output: {result.stderr}")
+        if verbose:
+            logger.error(f"Command output: {result.stdout}")
+        sys.exit(1)
+
+
+def process_participant(
+    bids_dir,
+    output_dir,
+    participant_label,
+    freesurfer_license,
+    skip_bids_validation,
+    skip_nidm,
+    verbose,
+):
+    """Process a single participant with FreeSurfer.
+
+    Args:
+        bids_dir (str): Path to BIDS root directory
+        output_dir (str): Path to output directory
+        participant_label (str): Participant label (without "sub-" prefix)
+        freesurfer_license (str): Path to FreeSurfer license file
+        skip_bids_validation (bool): Skip BIDS validation
+        skip_nidm (bool): Skip NIDM export
+        verbose (bool): Enable verbose output
+    """
+    layout, freesurfer_wrapper, freesurfer_dir, nidm_dir, version_info = initialize(
+        bids_dir, freesurfer_license, output_dir, skip_bids_validation, verbose
+    )
+
+    # Validate that the subject exists (strip "sub-" for BIDS query)
+    available_subjects = layout.get_subjects()
+    bids_subject = participant_label[4:]  # Strip "sub-" for BIDS query
+    if bids_subject not in available_subjects:
+        logger.error(f"Subject {participant_label} not found in dataset")
+        sys.exit(1)
+
+    # Run participant analysis
+    try:
+        success = freesurfer_wrapper.process_subject(participant_label, layout)
+        # Save processing summary
+        summary = freesurfer_wrapper.get_processing_summary()
+        summary["version_info"] = version_info
+        freesurfer_wrapper.save_processing_summary(summary)
+
+        logger.info("================================")
+        logger.info("Processing complete!")
+        logger.info("================================")
+
+    except Exception as e:
+        logger.error(f"Error during processing: {str(e)}")
+        sys.exit(1)
+
+    if success and not skip_nidm:
+        nidm_conversion(nidm_dir, freesurfer_dir, participant_label, verbose=verbose)
+
+    logger.info("BIDS-FreeSurfer processing complete.")
+    return 0
+
+
+def process_session(
+    bids_dir,
+    output_dir,
+    participant_label,
+    session_label,
+    freesurfer_license,
+    skip_bids_validation,
+    skip_nidm,
+    verbose,
+):
+    """Process a single session for a participant with FreeSurfer.
+
+    Args:
+        bids_dir (str): Path to BIDS root directory
+        output_dir (str): Path to output directory
+        participant_label (str): Participant label (without "sub-" prefix)
+        session_label (str): Session label (without "ses-" prefix)
+        freesurfer_license (str): Path to FreeSurfer license file
+        skip_bids_validation (bool): Skip BIDS validation
+        skip_nidm (bool): Skip NIDM export
+        verbose (bool): Enable verbose output
+    """
+    layout, freesurfer_wrapper, freesurfer_dir, nidm_dir, version_info = initialize(
+        bids_dir, freesurfer_license, output_dir, skip_bids_validation, verbose
+    )
+
+    # Validate that the subject exists (strip "sub-" for BIDS query)
+    available_subjects = layout.get_subjects()
+    bids_subject = participant_label[4:]  # Strip "sub-" for BIDS query
+    if bids_subject not in available_subjects:
+        logger.error(f"Subject {participant_label} not found in dataset")
+        sys.exit(1)
+
+    # Validate that the session exists
+    available_sessions = layout.get_sessions(subject=bids_subject)
+    bids_session = session_label[4:] if session_label.startswith("ses-") else session_label  # Strip "ses-" if present
+    if bids_session not in available_sessions:
+        logger.error(f"Session {session_label} not found for subject {participant_label}")
+        sys.exit(1)
+
+    # Run session-level analysis
+    try:
+        # Use the enhanced process_subject method with session_label
+        success = freesurfer_wrapper.process_subject(participant_label, layout, session_label=bids_session)
+        # Save processing summary
+        summary = freesurfer_wrapper.get_processing_summary()
+        summary["version_info"] = version_info
+        freesurfer_wrapper.save_processing_summary(summary)
+        logger.info("================================")
+        logger.info("Processing complete!")
+        logger.info("================================")
+
+    except Exception as e:
+        logger.error(f"Error during processing: {str(e)}")
+        sys.exit(1)
+
+    if success and not skip_nidm:
+        nidm_conversion(nidm_dir, freesurfer_dir, participant_label, bids_session, verbose=verbose)
+
+    logger.info("BIDS-FreeSurfer processing complete.")
+    return 0
+
+
 @click.command()
-@click.argument(
-    "bids_dir", type=click.Path(exists=True, file_okay=False, resolve_path=True)
-)
+@click.version_option(version=__version__)
+@click.argument("bids_dir", type=click.Path(exists=True, file_okay=False, resolve_path=True))
 @click.argument("output_dir", type=click.Path(file_okay=False, resolve_path=True))
-@click.argument("analysis_level", type=click.Choice(["participant", "group"]))
+@click.argument(
+    "analysis_level",
+    type=click.Choice(["participant", "session"]),
+)
 @click.option(
     "--participant_label",
-    multiple=True,
-    help='The label(s) of the participant(s) to analyze (without "sub-").',
+    "--participant-label",
+    help='The label of the participant to analyze (including "sub-" prefix, e.g., "sub-001").',
 )
 @click.option(
     "--session_label",
-    multiple=True,
-    help='The label(s) of the session(s) to analyze (without "ses-").',
+    "--session-label",
+    help='The label of the session to analyze (including "ses-" prefix, e.g., "ses-01"). Only used with "session" analysis level.',
 )
 @click.option(
     "--freesurfer_license",
+    "--fs-license-file",
     type=click.Path(exists=True, resolve_path=True),
     help="Path to FreeSurfer license file.",
 )
-@click.option("--skip_bids_validator", is_flag=True, help="Skip BIDS validation.")
-@click.option(
-    "--fs_options",
-    help='Additional options for recon-all, e.g. "--fs_options=-parallel"',
-)
-@click.option("--skip_nidm", is_flag=True, help="Skip NIDM output generation.")
+@click.option("--skip-bids-validation", is_flag=True, help="Skip BIDS validation.")
+@click.option("--skip_nidm", "--skip-nidm", is_flag=True, help="Skip NIDM output generation.")
 @click.option("--verbose", is_flag=True, help="Enable verbose output.")
-def main(
+def cli(
     bids_dir,
     output_dir,
     analysis_level,
     participant_label,
     session_label,
     freesurfer_license,
-    skip_bids_validator,
-    fs_options,
+    skip_bids_validation,
     skip_nidm,
     verbose,
 ):
     """FreeSurfer BIDS App with NIDM Output.
 
-    This BIDS App runs FreeSurfer's recon-all pipeline on T1w and optionally T2w images
-    from a BIDS dataset and outputs both standard FreeSurfer results and NIDM format results.
+    This BIDS App runs FreeSurfer's recon-all pipeline on T1w images from a BIDS dataset.
+    It supports individual participant analysis and can generate NIDM outputs.
+
+    BIDS_DIR is the path to the BIDS dataset directory.
+
+    OUTPUT_DIR is the path where results will be stored.
+
+    ANALYSIS_LEVEL determines the processing stage to be run:
+    - 'participant': processes a single subject
+    - 'session': processes a single session for a subject
     """
-    # Set logging level based on verbosity
-    log_level = logging.DEBUG if verbose else logging.INFO
-    setup_logging(log_level)
-
-    # Print version and check environment
-    version = "0.1.0"
-    logger.info(f"BIDS-FreeSurfer version: {version}")
-    logger.info(f"FreeSurfer version: {get_freesurfer_version()}")
-
-    # Create output directories
+    # Create the output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
-    freesurfer_dir = os.path.join(output_dir, "freesurfer")
-    os.makedirs(freesurfer_dir, exist_ok=True)
-    nidm_dir = os.path.join(output_dir, "nidm")
-    os.makedirs(nidm_dir, exist_ok=True)
 
-    # Create BIDS provenance
-    bids_provenance = create_bids_provenance(bids_dir, output_dir, version)
-
-    # Load BIDS dataset
-    try:
-        layout = BIDSLayout(bids_dir, validate=not skip_bids_validator)
-        logger.info(f"Found BIDS dataset with {len(layout.get_subjects())} subjects")
-    except Exception as e:
-        logger.error(f"Error loading BIDS dataset: {str(e)}")
-        sys.exit(1)
-
-    # Initialize FreeSurfer wrapper
-    try:
-        freesurfer_wrapper = FreeSurferWrapper(
-            bids_dir, freesurfer_dir, freesurfer_license, fs_options
+    if analysis_level == "participant":
+        if not participant_label:
+            logger.error("Participant label is required for participant-level analysis")
+            sys.exit(1)
+        return process_participant(
+            bids_dir,
+            output_dir,
+            participant_label,
+            freesurfer_license,
+            skip_bids_validation,
+            skip_nidm,
+            verbose,
         )
-    except Exception as e:
-        logger.error(f"Error initializing FreeSurfer wrapper: {str(e)}")
-        sys.exit(1)
-
-    # Get subjects to analyze
-    subjects_to_analyze = get_subjects_to_analyze(layout, participant_label)
-    sessions_to_analyze = get_sessions_to_analyze(layout, session_label)
-
-    # Run analysis
-    try:
-        if analysis_level == "participant":
-            run_participant_level(
-                layout,
-                subjects_to_analyze,
-                sessions_to_analyze,
-                freesurfer_wrapper,
-                bids_provenance,
-                freesurfer_dir,
-                nidm_dir,
-                output_dir,
-                skip_nidm,
-            )
-        else:  # group level
-            run_group_level(
-                subjects_to_analyze,
-                bids_provenance,
-                freesurfer_dir,
-                nidm_dir,
-                skip_nidm,
-            )
-    except Exception as e:
-        logger.error(f"Error during {analysis_level} level processing: {str(e)}")
-        sys.exit(1)
-
-    logger.info("BIDS-FreeSurfer processing complete.")
-    return 0
-
-
-def get_subjects_to_analyze(layout, participant_label):
-    """
-    Get list of subjects to analyze.
-
-    Parameters:
-    -----------
-    layout : BIDSLayout
-        The BIDS layout object
-    participant_label : list
-        List of participant labels to include
-
-    Returns:
-    --------
-    list
-        List of subject IDs with 'sub-' prefix
-    """
-    if participant_label:
-        subjects = ["sub-" + label for label in participant_label]
-        # Verify subjects exist in dataset
-        available_subjects = ["sub-" + s for s in layout.get_subjects()]
-        missing = [s for s in subjects if s not in available_subjects]
-        if missing:
-            logger.warning(
-                f"Requested participants not found in dataset: {', '.join(missing)}"
-            )
-        return [s for s in subjects if s in available_subjects]
-    else:
-        return ["sub-" + s for s in layout.get_subjects()]
-
-
-def get_sessions_to_analyze(layout, session_label):
-    """
-    Get list of sessions to analyze.
-
-    Parameters:
-    -----------
-    layout : BIDSLayout
-        The BIDS layout object
-    session_label : list
-        List of session labels to include
-
-    Returns:
-    --------
-    list
-        List of session IDs (may be empty if no sessions in dataset)
-    """
-    if session_label:
-        sessions = list(session_label)
-        available_sessions = layout.get_sessions()
-        missing = [s for s in sessions if s not in available_sessions]
-        if missing:
-            logger.warning(
-                f"Requested sessions not found in dataset: {', '.join(missing)}"
-            )
-        return [s for s in sessions if s in available_sessions]
-    else:
-        sessions = layout.get_sessions()
-        if not sessions:
-            return [None]  # No sessions in dataset
-        return sessions
-
-
-def run_participant_level(
-    layout,
-    subjects,
-    sessions,
-    freesurfer_wrapper,
-    bids_provenance,
-    freesurfer_dir,
-    nidm_dir,
-    output_dir,
-    skip_nidm,
-):
-    """
-    Run participant level analysis.
-
-    Parameters:
-    -----------
-    layout : BIDSLayout
-        The BIDS layout object
-    subjects : list
-        List of subject IDs to process
-    sessions : list
-        List of session IDs to process
-    freesurfer_wrapper : FreeSurferWrapper
-        FreeSurfer wrapper object
-    bids_provenance : BIDSProvenance
-        BIDS provenance tracker
-    freesurfer_dir : str
-        FreeSurfer output directory
-    nidm_dir : str
-        NIDM output directory
-    output_dir : str
-        Main output directory
-    skip_nidm : bool
-        Whether to skip NIDM output generation
-    """
-    logger.info(f"Running participant level analysis on {len(subjects)} subjects")
-
-    # Track successes and failures
-    results = {"success": [], "failure": []}
-
-    for subject in subjects:
-        subject_label = subject.replace("sub-", "")
-
-        for session in sessions:
-            session_label = session.replace("ses-", "") if session else None
-
-            try:
-                # Process this subject/session with FreeSurfer
-                logger.info(
-                    f"Processing subject {subject_label}{f' session {session_label}' if session_label else ''}"
-                )
-                success = freesurfer_wrapper.process_subject(
-                    subject_label, session_label, layout
-                )
-
-                if success:
-                    # Create BIDS provenance
-                    t1w_images = freesurfer_wrapper._find_t1w_images(
-                        layout, subject_label, session_label
-                    )
-                    t2w_images = freesurfer_wrapper._find_t2w_images(
-                        layout, subject_label, session_label
-                    )
-
-                    command = f"recon-all -all -subjid {subject_label}{f'_{session_label}' if session_label else ''}"
-                    if t2w_images:
-                        command += " -T2 -T2pial"
-                    if freesurfer_wrapper.fs_options:
-                        command += f" {freesurfer_wrapper.fs_options}"
-
-                    bids_provenance.create_subject_provenance(
-                        subject_label, session_label, t1w_images, t2w_images, command
-                    )
-
-                    # Set up output directory path
-                    if session_label:
-                        subject_output_dir = os.path.join(
-                            output_dir, f"sub-{subject_label}", f"ses-{session_label}"
-                        )
-                    else:
-                        subject_output_dir = os.path.join(
-                            output_dir, f"sub-{subject_label}"
-                        )
-
-                    # Copy outputs to BIDS-compliant structure
-                    copy_freesurfer_outputs(
-                        freesurfer_dir, subject_label, session_label, subject_output_dir
-                    )
-
-                    # Create NIDM output if requested
-                    if not skip_nidm:
-                        convert_subject(
-                            freesurfer_dir, subject_label, session_label, nidm_dir
-                        )
-
-                    results["success"].append(
-                        f"{subject_label}{f'_{session_label}' if session_label else ''}"
-                    )
-                else:
-                    results["failure"].append(
-                        f"{subject_label}{f'_{session_label}' if session_label else ''}"
-                    )
-                    logger.error(
-                        f"Failed to process subject {subject_label}{f' session {session_label}' if session_label else ''}"
-                    )
-            except Exception as e:
-                results["failure"].append(
-                    f"{subject_label}{f'_{session_label}' if session_label else ''}"
-                )
-                logger.error(
-                    f"Error processing subject {subject_label}{f' session {session_label}' if session_label else ''}: {str(e)}"
-                )
-
-    # Print summary
-    logger.info(
-        f"Processing complete. Successfully processed {len(results['success'])} subject/sessions."
-    )
-    if results["failure"]:
-        logger.warning(
-            f"Failed to process {len(results['failure'])} subject/sessions: {', '.join(results['failure'])}"
+    elif analysis_level == "session":
+        if not participant_label or not session_label:
+            logger.error("Both participant and session labels are required for session-level analysis")
+            sys.exit(1)
+        return process_session(
+            bids_dir,
+            output_dir,
+            participant_label,
+            session_label,
+            freesurfer_license,
+            skip_bids_validation,
+            skip_nidm,
+            verbose,
         )
 
-    # Save processing summary
-    summary_path = os.path.join(output_dir, "processing_summary.json")
-    with open(summary_path, "w") as f:
-        json.dump(
-            {"timestamp": datetime.datetime.now().isoformat(), "results": results},
-            f,
-            indent=2,
-        )
-    logger.info(f"Processing summary saved to {summary_path}")
 
-
-def run_group_level(subjects, bids_provenance, freesurfer_dir, nidm_dir, skip_nidm):
-    """
-    Run group level analysis.
-
-    Parameters:
-    -----------
-    subjects : list
-        List of subject IDs
-    bids_provenance : BIDSProvenance
-        BIDS provenance tracker
-    freesurfer_dir : str
-        FreeSurfer output directory
-    nidm_dir : str
-        NIDM output directory
-    skip_nidm : bool
-        Whether to skip NIDM output generation
-    """
-    logger.info("Running group level analysis")
-
-    # Create group provenance
-    bids_provenance.create_group_provenance(subjects)
-
-    # FreeSurfer group analysis would go here
-    # TODO: Implement FreeSurfer group-level analyses
-    logger.info("No FreeSurfer group-level analyses implemented yet")
-
-    # Create group NIDM
-    if not skip_nidm:
-        create_group_nidm(subjects, nidm_dir)
-
-
-def copy_freesurfer_outputs(
-    freesurfer_dir, subject_label, session_label, output_subject_dir
-):
-    """
-    Copy relevant FreeSurfer outputs to BIDS-compliant structure.
-
-    Parameters:
-    -----------
-    freesurfer_dir : str
-        FreeSurfer output directory
-    subject_label : str
-        Subject label
-    session_label : str or None
-        Session label (or None if no session)
-    output_subject_dir : str
-        Output directory for this subject
-    """
-    # Determine source directory based on whether there's a session or not
-    if session_label:
-        subject_id = f"{subject_label}_{session_label}"
-    else:
-        subject_id = subject_label
-
-    source_dir = os.path.join(freesurfer_dir, subject_id)
-
-    if not os.path.exists(source_dir):
-        logger.warning(f"FreeSurfer output directory {source_dir} not found.")
-        return
-
-    # Create output subdirectories
-    for subdir in ["anat", "surf", "stats", "label", "mri", "scripts"]:
-        os.makedirs(os.path.join(output_subject_dir, subdir), exist_ok=True)
-
-    # File mapping
-    file_mapping = {
-        # Critical volumes in MRI directory
-        "mri/T1.mgz": "anat/T1.mgz",
-        "mri/aparc+aseg.mgz": "anat/aparc+aseg.mgz",
-        "mri/aparc.a2009s+aseg.mgz": "anat/aparc.a2009s+aseg.mgz",
-        "mri/aparc.DKTatlas+aseg.mgz": "anat/aparc.DKTatlas+aseg.mgz",
-        "mri/brainmask.mgz": "anat/brainmask.mgz",
-        "mri/brain.mgz": "anat/brain.mgz",
-        "mri/aseg.mgz": "anat/aseg.mgz",
-        "mri/wm.mgz": "anat/wm.mgz",
-        "mri/wmparc.mgz": "anat/wmparc.mgz",
-        "mri/ribbon.mgz": "anat/ribbon.mgz",
-        "mri/entowm.mgz": "anat/entowm.mgz",  # Include specialized files if present
-        # Important surfaces
-        "surf/lh.white": "surf/lh.white",
-        "surf/rh.white": "surf/rh.white",
-        "surf/lh.pial": "surf/lh.pial",
-        "surf/rh.pial": "surf/rh.pial",
-        "surf/lh.inflated": "surf/lh.inflated",
-        "surf/rh.inflated": "surf/rh.inflated",
-        "surf/lh.sphere.reg": "surf/lh.sphere.reg",
-        "surf/rh.sphere.reg": "surf/rh.sphere.reg",
-        "surf/lh.thickness": "surf/lh.thickness",
-        "surf/rh.thickness": "surf/rh.thickness",
-        "surf/lh.area": "surf/lh.area",
-        "surf/rh.area": "surf/rh.area",
-        "surf/lh.curv": "surf/lh.curv",
-        "surf/rh.curv": "surf/rh.curv",
-        "surf/lh.sulc": "surf/lh.sulc",
-        "surf/rh.sulc": "surf/rh.sulc",
-        # Essential stats
-        "stats/aseg.stats": "stats/aseg.stats",
-        "stats/lh.aparc.stats": "stats/lh.aparc.stats",
-        "stats/rh.aparc.stats": "stats/rh.aparc.stats",
-        "stats/lh.aparc.a2009s.stats": "stats/lh.aparc.a2009s.stats",
-        "stats/rh.aparc.a2009s.stats": "stats/rh.aparc.a2009s.stats",
-        "stats/lh.aparc.DKTatlas.stats": "stats/lh.aparc.DKTatlas.stats",
-        "stats/rh.aparc.DKTatlas.stats": "stats/rh.aparc.DKTatlas.stats",
-        "stats/wmparc.stats": "stats/wmparc.stats",
-        "stats/brainvol.stats": "stats/brainvol.stats",
-        "stats/entowm.stats": "stats/entowm.stats",  # Include specialized files if present
-        # Critical labels/annotations
-        "label/lh.aparc.annot": "label/lh.aparc.annot",
-        "label/rh.aparc.annot": "label/rh.aparc.annot",
-        "label/lh.aparc.a2009s.annot": "label/lh.aparc.a2009s.annot",
-        "label/rh.aparc.a2009s.annot": "label/rh.aparc.a2009s.annot",
-        "label/lh.aparc.DKTatlas.annot": "label/lh.aparc.DKTatlas.annot",
-        "label/rh.aparc.DKTatlas.annot": "label/rh.aparc.DKTatlas.annot",
-        # Processing logs and scripts
-        "scripts/recon-all.log": "scripts/recon-all.log",
-        "scripts/recon-all.done": "scripts/recon-all.done",
-        "scripts/recon-all.env": "scripts/recon-all.env",
-        "scripts/build-stamp.txt": "scripts/build-stamp.txt",
-    }
-
-    # Copy files
-    copied_files = []
-    missing_files = []
-
-    for src, dst in file_mapping.items():
-        src_path = os.path.join(source_dir, src)
-        dst_path = os.path.join(output_subject_dir, dst)
-
-        if os.path.exists(src_path):
-            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-            try:
-                shutil.copy2(src_path, dst_path)
-                copied_files.append(src)
-                logger.debug(f"Copied {src_path} to {dst_path}")
-            except Exception as e:
-                logger.warning(f"Failed to copy {src_path}: {str(e)}")
-        else:
-            missing_files.append(src)
-            logger.debug(f"Source file not found: {src_path}")
-
-    logger.info(
-        f"Copied {len(copied_files)} FreeSurfer output files for subject {subject_label}{f' session {session_label}' if session_label else ''}"
-    )
-    if len(missing_files) > 0:
-        logger.debug(f"Missing {len(missing_files)} expected FreeSurfer output files")
+def main():
+    """Entry point for the CLI."""
+    try:
+        cli()
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

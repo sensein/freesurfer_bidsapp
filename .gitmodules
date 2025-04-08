@@ -1,0 +1,3 @@
+[submodule "src/segstats_jsonld"]
+	path = src/segstats_jsonld
+	url = https://github.com/ReproNim/segstats_jsonld.git
