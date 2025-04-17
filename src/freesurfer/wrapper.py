@@ -46,8 +46,9 @@ class FreeSurferWrapper:
         self.freesurfer_dir = self.output_dir / "freesurfer"
         self.freesurfer_license = freesurfer_license    
 
-        # Track processing results
+        # Track processing results and image information
         self.results = {"success": [], "failure": [], "skipped": []}
+        self.subject_t1_mapping = {}  # Store subject->T1 mapping
         self.temp_files = []
 
         # Ensure output directories exist
@@ -177,18 +178,18 @@ class FreeSurferWrapper:
                                              (f"_ses-{bids_session}" if bids_session else ""))
                 return False
 
+            # Store T1 image information
+            fs_subject_id = f"{subject_id}_ses-{session_label}" if session_label else subject_id
+            self.subject_t1_mapping[fs_subject_id] = {
+                'T1w_images': [str(img) for img in t1w_images],
+                'session': session_label
+            }
+
             t2w_images = self._find_images(layout, bids_subject, "T2w", bids_session)
             if t2w_images:
                 logger.info(f"Found {len(t2w_images)} T2w images for {subject_id}" + 
                            (f" session {session_label}" if session_label else ""))
-
-            # Determine the FreeSurfer subject ID
-            fs_subject_id = subject_id
-            if session_label:
-                if session_label.startswith("ses-"):
-                    fs_subject_id = f"{subject_id}_{session_label}"
-                else:
-                    fs_subject_id = f"{subject_id}_ses-{session_label}"
+                self.subject_t1_mapping[fs_subject_id]['T2w_images'] = [str(img) for img in t2w_images]
 
             # Check if subject already processed
             if (self.freesurfer_dir / fs_subject_id / "scripts" / "recon-all.done").exists():
@@ -384,3 +385,21 @@ For more information about FreeSurfer, visit: http://surfer.nmr.mgh.harvard.edu/
             json.dump(summary, f, indent=2)
         logger.info(f"Processing summary saved to {output_path}")
         return output_path
+
+    def get_subject_t1_info(self, subject_id, session_label=None):
+        """Get T1 image information for a subject.
+
+        Parameters
+        ----------
+        subject_id : str
+            Subject ID (including 'sub-' prefix)
+        session_label : str, optional
+            Session label
+
+        Returns
+        -------
+        dict
+            Dictionary containing T1 image information
+        """
+        fs_subject_id = f"{subject_id}_ses-{session_label}" if session_label else subject_id
+        return self.subject_t1_mapping.get(fs_subject_id, {})
