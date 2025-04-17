@@ -3,8 +3,15 @@
 Tests for the FreeSurfer BIDS App run script.
 """
 
+#!/usr/bin/env python3
+"""
+Tests for the FreeSurfer BIDS App run script.
+"""
+
 import json
 import os
+import pytest
+import shutil
 import pytest
 import shutil
 from pathlib import Path
