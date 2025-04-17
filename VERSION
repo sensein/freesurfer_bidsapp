@@ -1,5 +1,5 @@
 {
-    "bids_freesurfer": {
+    "freesurfer_bidsapp": {
         "version": "0.1.0",
         "source": "setup.py"
     },

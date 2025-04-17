@@ -95,12 +95,13 @@ def initialize(bids_dir, freesurfer_license, output_dir, skip_bids_validation, v
     return layout, freesurfer_wrapper, freesurfer_dir, nidm_dir, version_info
 
 
-def nidm_conversion(nidm_dir, freesurfer_dir, participant_label, bids_session=None, verbose=False):
+def nidm_conversion(nidm_dir, freesurfer_dir, participant_label, freesurfer_wrapper, bids_session=None, verbose=False):
     """Convert FreeSurfer outputs to NIDM format.
     Args:
         nidm_dir (str): Path to NIDM output directory
         freesurfer_dir (str): Path to FreeSurfer output directory
         participant_label (str): Participant label (without "sub-" prefix)
+        freesurfer_wrapper (FreeSurferWrapper): Instance of FreeSurferWrapper containing T1 info
         bids_session (str): Session label (without "ses-" prefix)
         verbose (bool): Enable verbose output
     """
@@ -110,6 +111,13 @@ def nidm_conversion(nidm_dir, freesurfer_dir, participant_label, bids_session=No
     else:
         fs_subject_id = f"{participant_label}_ses-{bids_session}"
     subject_dir = os.path.join(freesurfer_dir, fs_subject_id)
+
+    # Get T1 and T2 image information
+    t1_info = freesurfer_wrapper.get_subject_t1_info(participant_label, bids_session)
+    t1_images = t1_info.get('T1w_images', [])
+    t2_images = t1_info.get('T2w_images', [])
+    if not t1_images:
+        logger.warning(f"No T1 image information found for {fs_subject_id}")
 
     os.makedirs(nidm_dir, exist_ok=True)
 
@@ -124,6 +132,14 @@ def nidm_conversion(nidm_dir, freesurfer_dir, participant_label, bids_session=No
         nidm_dir,  # output directory
         "-j",  # output as JSON-LD
     ]
+
+    # Add T1 image information if available
+    if t1_images:
+        cmd.extend(["--t1"] + t1_images)
+
+    # Add T2 image information if available
+    if t2_images:
+        cmd.extend(["--t2"] + t2_images)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -187,7 +203,7 @@ def process_participant(
         sys.exit(1)
 
     if success and not skip_nidm:
-        nidm_conversion(nidm_dir, freesurfer_dir, participant_label, verbose=verbose)
+        nidm_conversion(nidm_dir, freesurfer_dir, participant_label, freesurfer_wrapper, verbose=verbose)
 
     logger.info("BIDS-FreeSurfer processing complete.")
     return 0
@@ -250,7 +266,7 @@ def process_session(
         sys.exit(1)
 
     if success and not skip_nidm:
-        nidm_conversion(nidm_dir, freesurfer_dir, participant_label, bids_session, verbose=verbose)
+        nidm_conversion(nidm_dir, freesurfer_dir, participant_label, freesurfer_wrapper, bids_session, verbose=verbose)
 
     logger.info("BIDS-FreeSurfer processing complete.")
     return 0

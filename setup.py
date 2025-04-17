@@ -122,7 +122,7 @@ if len(sys.argv) > 1 and sys.argv[1] in ["docker", "singularity", "containers"]:
 init_git_submodules()
 
 setup(
-    name="bids-freesurfer",
+    name="freesurfer_bidsapp",
     version="0.1.0",
     description="BIDS App for FreeSurfer with NIDM Output",
     author="ReproNim",
@@ -130,7 +130,7 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     license="MIT",
-    url="https://github.com/ReproNim/bids-freesurfer",
+    url="https://github.com/ReproNim/freesurfer_bidsapp",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
@@ -143,7 +143,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "bids-freesurfer=src.run:cli",
+            "freesurfer_bidsapp=src.run:cli",
         ],
     },
     python_requires=">=3.9",
